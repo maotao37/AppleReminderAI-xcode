@@ -28,11 +28,12 @@ jobs:
     name: 构建 DMG (${{ matrix.arch }})
     runs-on: macos-14
     strategy:
+      fail-fast: false
       matrix:
         arch: [arm64, x86_64]
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -62,7 +63,7 @@ jobs:
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           chmod +x ./scripts/package.sh
-          ./scripts/package.sh
+          bash -x ./scripts/package.sh
 
       - name: 生成 SHA256 校验文件
         run: |
@@ -85,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 解析 Release Tag
         id: release_info

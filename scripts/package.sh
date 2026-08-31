@@ -57,16 +57,26 @@ xcodebuild \
   ONLY_ACTIVE_ARCH=NO \
   MARKETING_VERSION="$VERSION" \
   CURRENT_PROJECT_VERSION="$VERSION" \
+  MACOSX_DEPLOYMENT_TARGET="14.0" \
+  CODE_SIGN_STYLE="Manual" \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
+  CODE_SIGN_ENTITLEMENTS="" \
+  DEVELOPMENT_TEAM="" \
+  PROVISIONING_PROFILE_SPECIFIER="" \
   CONFIGURATION_BUILD_DIR="$BUILD_DIR" \
   clean build
 
 BUILT_APP="$BUILD_DIR/AppleReminderAI-xcode.app"
 
 if [[ ! -d "$BUILT_APP" ]]; then
-  echo "❌ 编译产物不存在: $BUILT_APP" >&2
+  # 若默认路径不存在，自动在构建目录中寻找 .app 文件
+  BUILT_APP="$(find "$BUILD_DIR" -maxdepth 1 -name "*.app" | head -n 1)"
+fi
+
+if [[ -z "$BUILT_APP" || ! -d "$BUILT_APP" ]]; then
+  echo "❌ 编译产物不存在: $BUILD_DIR" >&2
   exit 1
 fi
 
