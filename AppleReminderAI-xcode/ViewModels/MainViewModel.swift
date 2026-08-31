@@ -70,6 +70,9 @@ class MainViewModel: ObservableObject {
     
     /// 最大历史记录数量
     private let maxHistoryCount = 50
+
+    /// Prevents an older parser request from overwriting newer input.
+    private var parseGeneration = 0
     
     // MARK: - 初始化
     
@@ -98,6 +101,8 @@ class MainViewModel: ObservableObject {
                 guard let self = self else { return }
                 
                 // 清除之前的解析结果和消息
+                self.parseGeneration += 1
+                self.isParsing = false
                 self.parsedItems = []
                 self.errorMessage = nil
                 self.successMessage = nil
@@ -122,27 +127,43 @@ class MainViewModel: ObservableObject {
             return
         }
         
+        parseGeneration += 1
+        let generation = parseGeneration
+        let parserMode = settings.parserMode
         isParsing = true
         errorMessage = nil
         
         do {
-            let parser = ParserFactory.createDefaultParser()
+            let parser = ParserFactory.createDefaultParser(
+                reminderGroupNames: reminderLists.map(\.title),
+                calendarGroupNames: calendars.map(\.title)
+            )
             let results = try await parser.parse(text)
-            
-            parsedItems = results
+
+            guard generation == parseGeneration,
+                  parserMode == settings.parserMode,
+                  text == inputText.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                return
+            }
+
+            parsedItems = results.map(assignGroup)
             
             if results.isEmpty {
                 errorMessage = "无法解析输入内容，请尝试更具体的描述"
             }
         } catch let error as ParserError {
+            guard generation == parseGeneration else { return }
             errorMessage = error.localizedDescription
             parsedItems = []
         } catch {
+            guard generation == parseGeneration else { return }
             errorMessage = "解析失败: \(error.localizedDescription)"
             parsedItems = []
         }
-        
-        isParsing = false
+
+        if generation == parseGeneration {
+            isParsing = false
+        }
     }
     
     /// 输入变化时自动解析（带防抖）
@@ -151,6 +172,8 @@ class MainViewModel: ObservableObject {
     func onInputChanged() {
         // 取消之前的解析任务
         parseTask?.cancel()
+        parseGeneration += 1
+        isParsing = false
         
         // 清除错误和成功信息
         errorMessage = nil
@@ -182,25 +205,16 @@ class MainViewModel: ObservableObject {
     /// - Parameter index: 要创建的事项索引
     func createItem(at index: Int) async {
         guard index >= 0 && index < parsedItems.count else { return }
-        let item = parsedItems[index]
+        let item = assignGroup(ScheduleNormalizer.normalize(parsedItems[index]))
         
         isCreating = true
         errorMessage = nil
         successMessage = nil
         
         do {
-            switch item.type {
-            case .reminder:
-                try await reminderService.createReminder(from: item, in: selectedReminderList)
-                successMessage = "提醒事项已创建"
-                
-            case .calendar:
-                try await calendarService.createEvent(from: item, in: selectedCalendar)
-                successMessage = "日历事件已创建"
-            }
-            
-            // 添加到历史记录
-            addToHistory(item: item, success: true)
+            let identifier = try await create(item)
+            successMessage = item.type == .reminder ? "提醒事项已创建" : "日历事件已创建"
+            addToHistory(item: assignGroup(item), success: true, calendarItemIdentifier: identifier)
             
             // 从列表中移除已创建的事项
             parsedItems.remove(at: index)
@@ -212,7 +226,7 @@ class MainViewModel: ObservableObject {
             
         } catch {
             errorMessage = error.localizedDescription
-            addToHistory(item: item, success: false, error: error.localizedDescription)
+            addToHistory(item: assignGroup(item), success: false, error: error.localizedDescription)
         }
         
         isCreating = false
@@ -228,39 +242,61 @@ class MainViewModel: ObservableObject {
         
         var successCount = 0
         var failCount = 0
+        var failedItems: [ParsedItem] = []
         
         // 创建副本以便遍历时修改原数组
         let itemsToCreate = parsedItems
         
-        for item in itemsToCreate {
+        for source in itemsToCreate {
+            let item = assignGroup(ScheduleNormalizer.normalize(source))
             do {
-                switch item.type {
-                case .reminder:
-                    try await reminderService.createReminder(from: item, in: selectedReminderList)
-                case .calendar:
-                    try await calendarService.createEvent(from: item, in: selectedCalendar)
-                }
-                
-                addToHistory(item: item, success: true)
+                let identifier = try await create(item)
+                addToHistory(item: assignGroup(item), success: true, calendarItemIdentifier: identifier)
                 successCount += 1
             } catch {
-                addToHistory(item: item, success: false, error: error.localizedDescription)
+                addToHistory(item: assignGroup(item), success: false, error: error.localizedDescription)
+                failedItems.append(assignGroup(item))
                 failCount += 1
             }
         }
-        
-        // 清空所有事项和输入
-        parsedItems = []
-        inputText = ""
+
+        parsedItems = failedItems
+        if failedItems.isEmpty {
+            inputText = ""
+        }
         
         // 设置结果消息
         if failCount == 0 {
             successMessage = "成功创建 \(successCount) 个事项"
         } else {
-            errorMessage = "创建完成：成功 \(successCount) 个，失败 \(failCount) 个"
+            errorMessage = "创建完成：成功 \(successCount) 个，失败 \(failCount) 个；失败项已保留，可直接重试"
         }
         
         isCreating = false
+    }
+
+    private func create(_ item: ParsedItem) async throws -> String? {
+        switch item.type {
+        case .reminder:
+            if !permissionManager.hasReminderAccess {
+                _ = try await permissionManager.requestReminderAccess()
+                loadAvailableLists()
+            }
+            let resolvedItem = assignGroup(item)
+            let target = resolvedItem.targetGroupIdentifier.flatMap { reminderService.getReminderList(by: $0) } ?? selectedReminderList
+            let reminder = try await reminderService.createReminder(from: resolvedItem, in: target)
+            return reminder.calendarItemIdentifier
+
+        case .calendar:
+            if !permissionManager.hasCalendarAccess {
+                _ = try await permissionManager.requestCalendarAccess()
+                loadAvailableLists()
+            }
+            let resolvedItem = assignGroup(item)
+            let target = resolvedItem.targetGroupIdentifier.flatMap { calendarService.getCalendar(by: $0) } ?? selectedCalendar
+            let event = try await calendarService.createEvent(from: resolvedItem, in: target)
+            return event.calendarItemIdentifier
+        }
     }
     
     /// 删除指定索引的解析事项（不创建，仅从列表中移除）
@@ -281,20 +317,46 @@ class MainViewModel: ObservableObject {
     func loadAvailableLists() {
         if permissionManager.hasReminderAccess {
             reminderLists = reminderService.fetchReminderLists()
-            selectedReminderList = reminderService.defaultReminderList()
+            if selectedReminderList == nil || !reminderLists.contains(where: { $0.calendarIdentifier == selectedReminderList?.calendarIdentifier }) {
+                selectedReminderList = reminderService.defaultReminderList()
+            }
         }
         
         if permissionManager.hasCalendarAccess {
             calendars = calendarService.fetchCalendars()
-            selectedCalendar = calendarService.defaultCalendar()
+            if selectedCalendar == nil || !calendars.contains(where: { $0.calendarIdentifier == selectedCalendar?.calendarIdentifier }) {
+                selectedCalendar = calendarService.defaultCalendar()
+            }
         }
+
+        parsedItems = parsedItems.map(assignGroup)
+    }
+
+    private func assignGroup(_ item: ParsedItem) -> ParsedItem {
+        GroupClassifier.assign(
+            item,
+            reminderLists: reminderLists,
+            calendars: calendars,
+            defaultReminderList: selectedReminderList ?? reminderService.defaultReminderList(),
+            defaultCalendar: selectedCalendar ?? calendarService.defaultCalendar()
+        )
     }
     
     // MARK: - 历史记录
     
     /// 添加到历史记录
-    private func addToHistory(item: ParsedItem, success: Bool, error: String? = nil) {
-        let record = CreatedItemRecord(item: item, isSuccess: success, errorMessage: error)
+    private func addToHistory(
+        item: ParsedItem,
+        success: Bool,
+        error: String? = nil,
+        calendarItemIdentifier: String? = nil
+    ) {
+        let record = CreatedItemRecord(
+            item: item,
+            isSuccess: success,
+            errorMessage: error,
+            calendarItemIdentifier: calendarItemIdentifier
+        )
         history.insert(record, at: 0)
         
         // 限制历史记录数量
@@ -309,6 +371,40 @@ class MainViewModel: ObservableObject {
     func clearHistory() {
         history.removeAll()
         saveHistory()
+    }
+
+    func retryHistoryItem(id: UUID) {
+        guard let record = history.first(where: { $0.id == id }) else { return }
+        let item = assignGroup(ScheduleNormalizer.normalize(record.item))
+        if !parsedItems.contains(where: { $0.id == item.id }) {
+            parsedItems.append(item)
+        }
+        errorMessage = nil
+        successMessage = "已将事项放回待创建列表"
+    }
+
+    func undoHistoryItem(id: UUID) async {
+        guard let index = history.firstIndex(where: { $0.id == id }),
+              history[index].isSuccess,
+              !history[index].isUndone,
+              let identifier = history[index].calendarItemIdentifier else {
+            return
+        }
+
+        do {
+            switch history[index].item.type {
+            case .reminder:
+                try reminderService.removeReminder(identifier: identifier)
+            case .calendar:
+                try calendarService.removeEvent(identifier: identifier)
+            }
+            history[index].undoneAt = Date()
+            saveHistory()
+            successMessage = "已撤销创建"
+            errorMessage = nil
+        } catch {
+            errorMessage = "撤销失败: \(error.localizedDescription)"
+        }
     }
     
     /// 保存历史记录
@@ -352,7 +448,7 @@ class MainViewModel: ObservableObject {
     ///   - index: 事项索引
     func updateParsedItem(_ item: ParsedItem, at index: Int) {
         guard index >= 0 && index < parsedItems.count else { return }
-        parsedItems[index] = item
+        parsedItems[index] = ScheduleNormalizer.normalize(item)
     }
     
     /// 切换指定索引事项的类型
@@ -360,5 +456,8 @@ class MainViewModel: ObservableObject {
     func toggleItemType(at index: Int) {
         guard index >= 0 && index < parsedItems.count else { return }
         parsedItems[index].type = parsedItems[index].type == .reminder ? .calendar : .reminder
+        parsedItems[index].targetGroupIdentifier = nil
+        parsedItems[index].targetGroupName = nil
+        parsedItems[index] = assignGroup(ScheduleNormalizer.normalize(parsedItems[index]))
     }
 }

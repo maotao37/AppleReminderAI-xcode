@@ -57,17 +57,31 @@ protocol ItemParser {
 /// 根据设置创建对应的解析器实例
 class ParserFactory {
     /// 根据当前设置获取解析器
-    static func createParser(for mode: ParserMode) -> ItemParser {
+    static func createParser(
+        for mode: ParserMode,
+        reminderGroupNames: [String] = [],
+        calendarGroupNames: [String] = []
+    ) -> ItemParser {
         switch mode {
         case .native:
             return NLPParser()
         case .openAI:
-            return OpenAIParser()
+            return OpenAIParser(
+                reminderGroupNames: reminderGroupNames,
+                calendarGroupNames: calendarGroupNames
+            )
         }
     }
     
     /// 使用当前设置创建默认解析器
-    static func createDefaultParser() -> ItemParser {
-        return createParser(for: AppSettings.shared.parserMode)
+    static func createDefaultParser(
+        reminderGroupNames: [String] = [],
+        calendarGroupNames: [String] = []
+    ) -> ItemParser {
+        return createParser(
+            for: AppSettings.shared.parserMode,
+            reminderGroupNames: reminderGroupNames,
+            calendarGroupNames: calendarGroupNames
+        )
     }
 }

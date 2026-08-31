@@ -94,6 +94,7 @@ struct MainView: View {
                                         }
                                         .buttonStyle(PlainButtonStyle())
                                         .disabled(viewModel.isParsing)
+                                        .keyboardShortcut(.return, modifiers: [.command])
                                         .padding(8)
                                         .transition(.scale.combined(with: .opacity))
                                     }
@@ -181,7 +182,11 @@ struct MainView: View {
                         // 显示历史记录
                         HistoryView(
                             history: viewModel.history,
-                            onClear: { viewModel.clearHistory() }
+                            onClear: { viewModel.clearHistory() },
+                            onRetry: { viewModel.retryHistoryItem(id: $0) },
+                            onUndo: { id in
+                                Task { await viewModel.undoHistoryItem(id: id) }
+                            }
                         )
                         .padding(.top)
                     }
@@ -190,14 +195,14 @@ struct MainView: View {
                 .animation(.spring(), value: !viewModel.parsedItems.isEmpty)
             }
             .background(Color(NSColor.controlBackgroundColor))
-            .sheet(isPresented: $viewModel.showSettings) {
+            .sheet(isPresented: $viewModel.showSettings, onDismiss: {
+                viewModel.loadAvailableLists()
+            }) {
                 SettingsView()
             }
             .onAppear {
                 isInputFocused = true
-                Task {
-                    await viewModel.requestPermissions()
-                }
+                viewModel.loadAvailableLists()
             }
         }
     }

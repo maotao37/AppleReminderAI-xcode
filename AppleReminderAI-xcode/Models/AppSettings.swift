@@ -46,6 +46,8 @@ class AppSettings: ObservableObject {
         static let defaultCalendarID = "defaultCalendarID"
         static let isMenuBarVisible = "isMenuBarVisible"
     }
+
+    private static let apiKeyAccount = "openAIAPIKey"
     
     // MARK: - 单例
     static let shared = AppSettings()
@@ -66,7 +68,7 @@ class AppSettings: ObservableObject {
     /// OpenAI API Key
     @Published var openAIAPIKey: String {
         didSet {
-            defaults.set(openAIAPIKey, forKey: Keys.openAIAPIKey)
+            KeychainStore.set(openAIAPIKey, for: Self.apiKeyAccount)
         }
     }
     
@@ -116,7 +118,15 @@ class AppSettings: ObservableObject {
         let modeRaw = defaults.string(forKey: Keys.parserMode) ?? ParserMode.native.rawValue
         self.parserMode = ParserMode(rawValue: modeRaw) ?? .native
         
-        self.openAIAPIKey = defaults.string(forKey: Keys.openAIAPIKey) ?? ""
+        let legacyAPIKey = defaults.string(forKey: Keys.openAIAPIKey) ?? ""
+        let keychainAPIKey = KeychainStore.string(for: Self.apiKeyAccount)
+        self.openAIAPIKey = keychainAPIKey ?? legacyAPIKey
+        if !legacyAPIKey.isEmpty {
+            if keychainAPIKey == nil {
+                KeychainStore.set(legacyAPIKey, for: Self.apiKeyAccount)
+            }
+            defaults.removeObject(forKey: Keys.openAIAPIKey)
+        }
         self.openAIBaseURL = defaults.string(forKey: Keys.openAIBaseURL) ?? "https://api.openai.com/v1"
         self.openAIModel = defaults.string(forKey: Keys.openAIModel) ?? "gpt-4o-mini"
         self.isMenuBarVisible = defaults.object(forKey: Keys.isMenuBarVisible) as? Bool ?? true
@@ -129,7 +139,20 @@ class AppSettings: ObservableObject {
     
     /// 检查 OpenAI 配置是否有效
     var isOpenAIConfigured: Bool {
-        !openAIAPIKey.isEmpty && !openAIBaseURL.isEmpty
+        !openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && validatedOpenAIBaseURL != nil
+    }
+
+    /// Remote endpoints must use TLS. Plain HTTP is allowed only for local model servers.
+    var validatedOpenAIBaseURL: URL? {
+        guard let url = URL(string: openAIBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = url.scheme?.lowercased(),
+              let host = url.host?.lowercased() else {
+            return nil
+        }
+
+        let isLoopback = host == "localhost" || host == "127.0.0.1" || host == "::1"
+        guard scheme == "https" || (scheme == "http" && isLoopback) else { return nil }
+        return url
     }
     
     /// 重置所有设置为默认值

@@ -79,6 +79,7 @@ struct ParsedItemsListView: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                     .disabled(isCreating)
+                    .keyboardShortcut(.return, modifiers: [.command, .shift])
                 }
             }
             .padding(.horizontal)
@@ -159,6 +160,18 @@ struct ParsedItemCardView: View {
                                 .font(.caption2)
                                 .foregroundColor(.purple)
                         }
+
+                        if let groupName = item.targetGroupName {
+                            Label(groupName, systemImage: "folder.fill")
+                                .font(.caption2)
+                                .foregroundColor(.teal)
+                        }
+
+                        if item.confidence < 0.7 {
+                            Label("请确认", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundColor(.orange)
+                        }
                     }
                 }
                 
@@ -222,7 +235,19 @@ struct ParsedItemCardView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                         
-                        Picker("", selection: $item.type) {
+                        Picker("", selection: Binding(
+                            get: { item.type },
+                            set: { newType in
+                                item.type = newType
+                                item.targetGroupIdentifier = newType == .reminder
+                                    ? selectedReminderList?.calendarIdentifier
+                                    : selectedCalendar?.calendarIdentifier
+                                item.targetGroupName = newType == .reminder
+                                    ? selectedReminderList?.title
+                                    : selectedCalendar?.title
+                                item = ScheduleNormalizer.normalize(item)
+                            }
+                        )) {
                             ForEach(ItemType.allCases, id: \.self) { type in
                                 Label(type.rawValue, systemImage: type.icon).tag(type)
                             }
@@ -244,7 +269,7 @@ struct ParsedItemCardView: View {
                     }
                     
                     // 时间选择
-                    HStack(spacing: 16) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 16)], alignment: .leading, spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.type == .calendar ? "开始时间" : "提醒时间")
                                 .font(.caption)
@@ -252,7 +277,10 @@ struct ParsedItemCardView: View {
                             
                             DatePicker("", selection: Binding(
                                 get: { item.dueDate ?? Date() },
-                                set: { item.dueDate = $0 }
+                                set: {
+                                    item.dueDate = $0
+                                    item = ScheduleNormalizer.normalize(item)
+                                }
                             ), displayedComponents: item.isAllDay ? [.date] : [.date, .hourAndMinute])
                             .labelsHidden()
                             .datePickerStyle(.stepperField)
@@ -266,7 +294,10 @@ struct ParsedItemCardView: View {
                                 
                                 DatePicker("", selection: Binding(
                                     get: { item.endDate ?? (item.dueDate?.addingTimeInterval(3600) ?? Date()) },
-                                    set: { item.endDate = $0 }
+                                    set: {
+                                        item.endDate = $0
+                                        item = ScheduleNormalizer.normalize(item)
+                                    }
                                 ), displayedComponents: item.isAllDay ? [.date] : [.date, .hourAndMinute])
                                 .labelsHidden()
                                 .datePickerStyle(.stepperField)
@@ -278,14 +309,17 @@ struct ParsedItemCardView: View {
                             Text("全天")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            Toggle("", isOn: $item.isAllDay)
+                            Toggle("", isOn: Binding(
+                                get: { item.isAllDay },
+                                set: { item = ScheduleNormalizer.settingAllDay($0, for: item) }
+                            ))
                                 .labelsHidden()
                                 .toggleStyle(SwitchToggleStyle())
                         }
                     }
                     
-                    // 重复周期和优先级
-                    HStack(spacing: 16) {
+                    // 重复、提醒和优先级
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 16)], alignment: .leading, spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("重复周期")
                                 .font(.caption)
@@ -296,6 +330,50 @@ struct ParsedItemCardView: View {
                                 }
                             }
                             .frame(width: 100)
+                        }
+
+                        if item.recurrence != .none && item.recurrence != .weekdays && item.recurrence != .biweekly {
+                            Stepper(
+                                "间隔 \(item.recurrenceInterval ?? 1)",
+                                value: Binding(
+                                    get: { item.recurrenceInterval ?? 1 },
+                                    set: { item.recurrenceInterval = $0 }
+                                ),
+                                in: 1...30
+                            )
+                            .font(.caption)
+                            .frame(width: 100)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("提醒")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Toggle("", isOn: Binding(
+                                get: { ScheduleNormalizer.isAlertEnabled(for: item) },
+                                set: {
+                                    item.alertEnabled = $0
+                                    if $0 && item.alertOffsetMinutes == nil {
+                                        item.alertOffsetMinutes = ScheduleNormalizer.defaultAlertOffset(for: item)
+                                    }
+                                }
+                            ))
+                            .labelsHidden()
+                        }
+
+                        if ScheduleNormalizer.isAlertEnabled(for: item), item.dueDate != nil {
+                            Picker("", selection: Binding(
+                                get: { item.alertOffsetMinutes ?? ScheduleNormalizer.defaultAlertOffset(for: item) },
+                                set: { item.alertOffsetMinutes = $0 }
+                            )) {
+                                Text("准时").tag(0)
+                                Text("提前 5 分钟").tag(-5)
+                                Text("提前 15 分钟").tag(-15)
+                                Text("提前 30 分钟").tag(-30)
+                                Text("提前 1 小时").tag(-60)
+                                Text("提前 1 天").tag(-1440)
+                            }
+                            .frame(width: 120)
                         }
                         
                         VStack(alignment: .leading, spacing: 4) {
@@ -313,6 +391,29 @@ struct ParsedItemCardView: View {
                             .frame(width: 80)
                         }
                     }
+
+                    if item.recurrence == .weekly {
+                        WeekdaySelectionView(selection: Binding(
+                            get: { item.recurrenceWeekdays ?? [] },
+                            set: { item.recurrenceWeekdays = $0 }
+                        ))
+                    }
+
+                    if item.recurrence != .none {
+                        Toggle("设置重复截止日期", isOn: Binding(
+                            get: { item.recurrenceEndDate != nil },
+                            set: { item.recurrenceEndDate = $0 ? (item.dueDate ?? Date()) : nil }
+                        ))
+                        .font(.caption)
+
+                        if let recurrenceEndDate = item.recurrenceEndDate {
+                            DatePicker("截止", selection: Binding(
+                                get: { recurrenceEndDate },
+                                set: { item.recurrenceEndDate = $0 }
+                            ), displayedComponents: .date)
+                            .datePickerStyle(.stepperField)
+                        }
+                    }
                     
                     // 目标列表选择
                     VStack(alignment: .leading, spacing: 4) {
@@ -320,19 +421,34 @@ struct ParsedItemCardView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                         
-                        if item.type == .reminder {
-                            Picker("", selection: $selectedReminderList) {
-                                ForEach(reminderLists, id: \.calendarIdentifier) { list in
-                                    Text(list.title).tag(Optional(list))
-                                }
-                            }
+                        if availableGroups.isEmpty {
+                            Label("创建时请求权限并使用系统默认分组", systemImage: "lock")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         } else {
-                            Picker("", selection: $selectedCalendar) {
-                                ForEach(calendars, id: \.calendarIdentifier) { cal in
-                                    Text(cal.title).tag(Optional(cal))
+                            Picker("", selection: targetGroupBinding) {
+                                ForEach(availableGroups, id: \.calendarIdentifier) { group in
+                                    Text(group.title).tag(Optional(group.calendarIdentifier))
                                 }
                             }
                         }
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("备注")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        TextField("可选", text: Binding(
+                            get: { item.notes ?? "" },
+                            set: { item.notes = $0.isEmpty ? nil : $0 }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                    }
+
+                    if item.type == .calendar && item.dueDate == nil {
+                        Label("日历事件需要设置开始日期", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundColor(.orange)
                     }
                     
                     // 确认创建按钮
@@ -355,7 +471,7 @@ struct ParsedItemCardView: View {
                         .cornerRadius(8)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .disabled(isCreating || item.title.isEmpty)
+                    .disabled(isCreating || item.title.isEmpty || (item.type == .calendar && item.dueDate == nil))
                 }
                 .padding(12)
             }
@@ -367,5 +483,55 @@ struct ParsedItemCardView: View {
                 .stroke(isExpanded ? Color.blue.opacity(0.5) : Color.secondary.opacity(0.2), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+
+    private var availableGroups: [EKCalendar] {
+        item.type == .reminder ? reminderLists : calendars
+    }
+
+    private var targetGroupBinding: Binding<String?> {
+        Binding(
+            get: {
+                item.targetGroupIdentifier
+                    ?? (item.type == .reminder
+                        ? selectedReminderList?.calendarIdentifier
+                        : selectedCalendar?.calendarIdentifier)
+            },
+            set: { identifier in
+                item.targetGroupIdentifier = identifier
+                item.targetGroupName = availableGroups.first(where: { $0.calendarIdentifier == identifier })?.title
+            }
+        )
+    }
+}
+
+private struct WeekdaySelectionView: View {
+    @Binding var selection: [Int]
+    private let labels = ["一", "二", "三", "四", "五", "六", "日"]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("重复于")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            ForEach(1...7, id: \.self) { day in
+                Button {
+                    if selection.contains(day) {
+                        selection.removeAll { $0 == day }
+                    } else {
+                        selection.append(day)
+                        selection.sort()
+                    }
+                } label: {
+                    Text(labels[day - 1])
+                        .font(.caption)
+                        .frame(width: 24, height: 24)
+                        .background(selection.contains(day) ? Color.accentColor : Color.secondary.opacity(0.12))
+                        .foregroundColor(selection.contains(day) ? .white : .primary)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }

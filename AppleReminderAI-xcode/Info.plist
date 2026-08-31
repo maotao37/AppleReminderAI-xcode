@@ -10,10 +10,5 @@
 	<string>我们需要访问您的日历以创建和同步日程安排。</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>我们需要访问您的提醒事项以创建和同步待办任务。</string>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-	</dict>
 </dict>
 </plist>

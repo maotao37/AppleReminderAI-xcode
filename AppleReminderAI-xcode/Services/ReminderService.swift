@@ -16,6 +16,7 @@ enum ReminderServiceError: Error, LocalizedError {
     case saveFailed(String)
     case listNotFound
     case reminderNotFound
+    case duplicate
     
     var errorDescription: String? {
         switch self {
@@ -27,6 +28,8 @@ enum ReminderServiceError: Error, LocalizedError {
             return "找不到指定的提醒事项列表"
         case .reminderNotFound:
             return "找不到指定的提醒事项"
+        case .duplicate:
+            return "目标列表中已存在标题和时间相同的提醒事项"
         }
     }
 }
@@ -52,19 +55,24 @@ class ReminderService {
     
     /// 获取所有提醒事项列表
     func fetchReminderLists() -> [EKCalendar] {
-        return eventStore.calendars(for: .reminder)
+        return eventStore.calendars(for: .reminder).filter(\.allowsContentModifications)
     }
     
     /// 获取默认提醒事项列表
     func defaultReminderList() -> EKCalendar? {
         // 首先检查用户设置的默认列表
         if let listID = AppSettings.shared.defaultReminderListID,
-           let list = eventStore.calendar(withIdentifier: listID) {
+           let list = eventStore.calendar(withIdentifier: listID),
+           list.allowsContentModifications {
             return list
         }
         
         // 否则使用系统默认列表
-        return eventStore.defaultCalendarForNewReminders()
+        guard let list = eventStore.defaultCalendarForNewReminders(),
+              list.allowsContentModifications else {
+            return fetchReminderLists().first
+        }
+        return list
     }
     
     /// 根据 ID 获取列表
@@ -81,18 +89,20 @@ class ReminderService {
     /// - Returns: 创建的提醒事项
     @discardableResult
     func createReminder(from item: ParsedItem, in list: EKCalendar? = nil) async throws -> EKReminder {
-        // 检查权限
         guard permissionManager.hasReminderAccess else {
             throw ReminderServiceError.noAccess
         }
-        
-        // 获取目标列表
+
+        let item = ScheduleNormalizer.normalize(item)
         let targetList = list ?? defaultReminderList()
         guard let reminderList = targetList else {
             throw ReminderServiceError.listNotFound
         }
-        
-        // 创建提醒事项
+
+        if await hasDuplicate(item, in: reminderList) {
+            throw ReminderServiceError.duplicate
+        }
+
         let reminder = EKReminder(eventStore: eventStore)
         reminder.calendar = reminderList
         reminder.title = item.title
@@ -109,21 +119,22 @@ class ReminderService {
                     from: dueDate
                 )
             } else {
-                // 包含时间
                 reminder.dueDateComponents = calendar.dateComponents(
                     [.year, .month, .day, .hour, .minute],
                     from: dueDate
                 )
-                
-                // 添加提醒闹钟
-                let alarm = EKAlarm(absoluteDate: dueDate)
+            }
+
+            if ScheduleNormalizer.isAlertEnabled(for: item) {
+                let offset = item.alertOffsetMinutes ?? ScheduleNormalizer.defaultAlertOffset(for: item)
+                let alertDate = dueDate.addingTimeInterval(TimeInterval(offset * 60))
+                let alarm = EKAlarm(absoluteDate: alertDate)
                 reminder.addAlarm(alarm)
             }
         }
-        
-        // 设置重复规则
-        if item.recurrence != .none {
-            reminder.recurrenceRules = [createRecurrenceRule(for: item.recurrence)]
+
+        if let recurrenceRule = EventKitRecurrenceBuilder.makeRule(for: item) {
+            reminder.recurrenceRules = [recurrenceRule]
         }
         
         // 保存提醒事项
@@ -134,41 +145,37 @@ class ReminderService {
             throw ReminderServiceError.saveFailed(error.localizedDescription)
         }
     }
-    
-    // MARK: - 重复规则
-    
-    /// 创建重复规则
-    private func createRecurrenceRule(for recurrence: RecurrenceRule) -> EKRecurrenceRule {
-        let frequency: EKRecurrenceFrequency
-        let interval: Int
-        
-        switch recurrence {
-        case .none:
-            // 不应该到达这里
-            frequency = .daily
-            interval = 1
-        case .daily:
-            frequency = .daily
-            interval = 1
-        case .weekly:
-            frequency = .weekly
-            interval = 1
-        case .biweekly:
-            frequency = .weekly
-            interval = 2
-        case .monthly:
-            frequency = .monthly
-            interval = 1
-        case .yearly:
-            frequency = .yearly
-            interval = 1
+
+    func removeReminder(identifier: String) throws {
+        guard permissionManager.hasReminderAccess else { throw ReminderServiceError.noAccess }
+        guard let reminder = eventStore.calendarItem(withIdentifier: identifier) as? EKReminder else {
+            throw ReminderServiceError.reminderNotFound
         }
-        
-        return EKRecurrenceRule(
-            recurrenceWith: frequency,
-            interval: interval,
-            end: nil
-        )
+        do {
+            try eventStore.remove(reminder, commit: true)
+        } catch {
+            throw ReminderServiceError.saveFailed(error.localizedDescription)
+        }
+    }
+
+    private func hasDuplicate(_ item: ParsedItem, in list: EKCalendar) async -> Bool {
+        let reminders = await fetchIncompleteReminders(in: [list])
+        return reminders.contains { reminder in
+            let sameTitle = reminder.title.compare(item.title, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            guard sameTitle else { return false }
+
+            switch (item.dueDate, reminder.dueDateComponents?.date) {
+            case (nil, nil):
+                return true
+            case let (expected?, actual?):
+                if item.isAllDay {
+                    return Calendar.current.isDate(expected, inSameDayAs: actual)
+                }
+                return abs(expected.timeIntervalSince(actual)) < 60
+            default:
+                return false
+            }
+        }
     }
     
     // MARK: - 提醒事项查询

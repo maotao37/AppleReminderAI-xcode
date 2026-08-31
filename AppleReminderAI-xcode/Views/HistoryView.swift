@@ -12,6 +12,9 @@ import SwiftUI
 struct HistoryView: View {
     let history: [CreatedItemRecord]
     var onClear: () -> Void
+    var onRetry: (UUID) -> Void
+    var onUndo: (UUID) -> Void
+    @State private var isConfirmingClear = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -23,7 +26,9 @@ struct HistoryView: View {
                 Spacer()
                 
                 if !history.isEmpty {
-                    Button("清空记录", action: onClear)
+                    Button("清空记录") {
+                        isConfirmingClear = true
+                    }
                         .buttonStyle(PlainButtonStyle())
                         .font(.caption)
                         .foregroundColor(.blue)
@@ -48,7 +53,11 @@ struct HistoryView: View {
                 ScrollView {
                     VStack(spacing: 8) {
                         ForEach(history) { record in
-                            HistoryRow(record: record)
+                            HistoryRow(
+                                record: record,
+                                onRetry: { onRetry(record.id) },
+                                onUndo: { onUndo(record.id) }
+                            )
                         }
                     }
                     .padding(.horizontal)
@@ -56,12 +65,17 @@ struct HistoryView: View {
                 }
             }
         }
+        .confirmationDialog("清空所有创建记录？", isPresented: $isConfirmingClear) {
+            Button("清空记录", role: .destructive, action: onClear)
+        }
     }
 }
 
 /// 历史记录行组件
 struct HistoryRow: View {
     let record: CreatedItemRecord
+    var onRetry: () -> Void
+    var onUndo: () -> Void
     
     var body: some View {
         HStack(spacing: 12) {
@@ -94,6 +108,14 @@ struct HistoryRow: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+
+                    if let groupName = record.item.targetGroupName {
+                        Text("•")
+                            .foregroundColor(.secondary)
+                        Label(groupName, systemImage: "folder")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             
@@ -101,7 +123,10 @@ struct HistoryRow: View {
             
             // 状态
             VStack(alignment: .trailing, spacing: 2) {
-                if record.isSuccess {
+                if record.isUndone {
+                    Image(systemName: "arrow.uturn.backward.circle.fill")
+                        .foregroundColor(.secondary)
+                } else if record.isSuccess {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
                 } else {
@@ -113,11 +138,26 @@ struct HistoryRow: View {
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
+
+
+            if !record.isSuccess {
+                Button(action: onRetry) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("重新编辑并创建")
+            } else if !record.isUndone, record.calendarItemIdentifier != nil {
+                Button(action: onUndo) {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+                .buttonStyle(.borderless)
+                .help("撤销创建")
+            }
         }
         .padding(10)
         .background(Color.secondary.opacity(0.05))
         .cornerRadius(10)
-        .help(record.errorMessage ?? (record.isSuccess ? "已成功创建" : "创建失败"))
+        .help(record.errorMessage ?? (record.isUndone ? "已撤销" : (record.isSuccess ? "已成功创建" : "创建失败")))
     }
     
     private func formatDate(_ date: Date) -> String {

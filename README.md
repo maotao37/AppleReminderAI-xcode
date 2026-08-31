@@ -15,7 +15,10 @@
 - 📅 **日历事件** - 智能识别会议、活动等，创建日历事件
 - ⏰ **提醒事项** - 识别待办任务，创建提醒事项
 - 🔁 **周期设置** - 支持每天、每周、每月等重复周期
+- 🗂️ **自动分组** - 根据事项语义和用户已有列表/日历自动选择目标分组，不创建陌生分组
+- 🔔 **精确提醒** - 支持全天/定时识别、提前分钟数、工作日及自定义重复间隔
 - 📝 **批量创建** - 一次输入可解析多个事项，支持批量创建
+- ↩️ **历史管理** - 创建失败项可重试，已创建事项支持撤销
 - 🎨 **原生体验** - 100% SwiftUI 开发，完美融入 macOS 生态
 - 🔔 **状态栏支持** - 可在状态栏快速访问
 
@@ -69,6 +72,8 @@ open AppleReminderAI-xcode.xcodeproj
 
 3. 确认解析结果后，点击创建按钮
 
+解析结果支持逐项修改标题、备注、日期、全天状态、提醒偏移、重复规则和目标列表/日历。自动分组仅会匹配当前账户中已有且允许修改的分组；无法可靠判断时使用系统默认分组。
+
 ### 配置 AI 解析
 
 1. 点击设置图标进入设置页面
@@ -95,8 +100,12 @@ AppleReminderAI-xcode/
 ├── ViewModels/                  # 视图模型
 │   └── MainViewModel.swift     # 主视图模型
 ├── Services/                    # 服务层
-│   ├── NativeParser.swift      # 原生解析器
+│   ├── NLPParser.swift         # 原生解析器
 │   ├── OpenAIParser.swift      # AI 解析器
+│   ├── ScheduleNormalizer.swift # 日期、提醒和重复规则归一化
+│   ├── GroupClassifier.swift   # 自动匹配提醒列表/日历
+│   ├── EventKitRecurrenceBuilder.swift # EventKit 重复规则构建
+│   ├── KeychainStore.swift     # API Key 安全存储
 │   ├── ReminderService.swift   # 提醒事项服务
 │   ├── CalendarService.swift   # 日历服务
 │   └── PermissionManager.swift # 权限管理
@@ -109,7 +118,7 @@ AppleReminderAI-xcode/
 - **提醒事项访问权限** - 用于创建提醒事项
 - **日历访问权限** - 用于创建日历事件
 
-所有数据保存在本地，AI 解析模式下输入内容会发送至配置的 API 端点。
+事项历史和常规设置保存在本地，API Key 存储在 macOS 钥匙串中。AI 解析模式下，输入内容以及现有提醒列表/日历名称会发送至配置的 API 端点；远程端点必须使用 HTTPS，本机 localhost 服务可使用 HTTP。
 
 ## 🤝 贡献
 

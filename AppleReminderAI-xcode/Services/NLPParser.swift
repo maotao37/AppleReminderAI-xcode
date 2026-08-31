@@ -33,6 +33,8 @@ class NLPParser: ItemParser {
         "每天": .daily,
         "每日": .daily,
         "天天": .daily,
+        "工作日": .weekdays,
+        "每个工作日": .weekdays,
         "每周": .weekly,
         "每星期": .weekly,
         "每礼拜": .weekly,
@@ -89,14 +91,37 @@ class NLPParser: ItemParser {
     /// - Parameter text: 原始输入文本
     /// - Returns: 分割后的文本片段数组
     private func splitIntoSegments(_ text: String) -> [String] {
-        // 支持的分隔符：中文逗号、英文逗号、分号、换行符
-        let separators = CharacterSet(charactersIn: "，,；;\n")
-        let segments = text.components(separatedBy: separators)
+        // 分号和换行明确分隔事项；逗号只有在两侧都像完整日程时才分隔。
+        let strongSeparators = CharacterSet(charactersIn: "；;\n")
+        let primarySegments = text.components(separatedBy: strongSeparators)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        
-        // 如果没有有效分割，返回原始文本
+
+        let segments = primarySegments.flatMap { segment -> [String] in
+            let commaParts = segment.components(separatedBy: CharacterSet(charactersIn: "，,"))
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+
+            guard commaParts.count > 1,
+                  commaParts.allSatisfy(containsSchedulingMarker) else {
+                return [segment]
+            }
+            return commaParts
+        }
+
         return segments.isEmpty ? [text] : segments
+    }
+
+    private func containsSchedulingMarker(_ text: String) -> Bool {
+        let keywords = reminderKeywords
+            + calendarKeywords
+            + Array(relativeDateKeywords.keys)
+            + Array(weekdayKeywords.keys)
+            + Array(recurrenceKeywords.keys)
+        if keywords.contains(where: { text.contains($0) }) { return true }
+
+        let pattern = #"\d{1,2}月\d{1,2}[日号]|\d{1,2}[:点时]\d{0,2}|(上午|下午|早上|晚上|中午)"#
+        return text.range(of: pattern, options: .regularExpression) != nil
     }
     
     /// 解析单个文本片段
@@ -115,9 +140,12 @@ class NLPParser: ItemParser {
         
         // 提取重复周期
         let recurrence = extractRecurrence(from: trimmedInput)
+        let recurrenceInterval = extractRecurrenceInterval(from: trimmedInput)
+        let recurrenceWeekdays = extractRecurrenceWeekdays(from: trimmedInput, recurrence: recurrence)
         
         // 判断事项类型
         let type = determineItemType(from: trimmedInput)
+        let alertSettings = extractAlertSettings(from: trimmedInput, type: type, isAllDay: isAllDay)
         
         // 提取标题（移除日期和关键词）
         let title = extractTitle(from: trimmedInput, type: type)
@@ -140,7 +168,7 @@ class NLPParser: ItemParser {
             finalEndDate = start.addingTimeInterval(3600)
         }
         
-        return ParsedItem(
+        let item = ParsedItem(
             type: type,
             title: title.isEmpty ? trimmedInput : title,
             notes: nil,
@@ -149,9 +177,14 @@ class NLPParser: ItemParser {
             isAllDay: isAllDay,
             priorityValue: 0,
             recurrence: recurrence,
+            recurrenceInterval: recurrenceInterval,
+            recurrenceWeekdays: recurrenceWeekdays,
+            alertEnabled: alertSettings.enabled,
+            alertOffsetMinutes: alertSettings.offsetMinutes,
             confidence: confidence,
             originalText: trimmedInput
         )
+        return ScheduleNormalizer.normalize(item)
     }
     
     // MARK: - 日期提取
@@ -191,14 +224,19 @@ class NLPParser: ItemParser {
             dueDate = parseRelativeDate(from: text)
         }
         
-        // 尝试解析时间
-        if let parsedTime = parseTime(from: text), let date = dueDate {
+        // 尝试解析时间。只有钟点没有日期时，使用最近的未来时刻。
+        if let parsedTime = parseTime(from: text) {
             let calendar = Calendar.current
-            var components = calendar.dateComponents([.year, .month, .day], from: date)
+            let hadExplicitDate = dueDate != nil
+            let baseDate = dueDate ?? calendar.startOfDay(for: Date())
+            var components = calendar.dateComponents([.year, .month, .day], from: baseDate)
             let timeComponents = calendar.dateComponents([.hour, .minute], from: parsedTime)
             components.hour = timeComponents.hour
             components.minute = timeComponents.minute
             dueDate = calendar.date(from: components)
+            if !hadExplicitDate, let date = dueDate, date <= Date() {
+                dueDate = calendar.date(byAdding: .day, value: 1, to: date)
+            }
             isAllDay = false
         }
         
@@ -284,18 +322,21 @@ class NLPParser: ItemParser {
     /// 获取下一个指定星期几的日期
     private func getNextWeekday(_ targetWeekday: Int, fromNextWeek: Bool) -> Date {
         let calendar = Calendar.current
-        let today = Date()
-        let currentWeekday = calendar.component(.weekday, from: today)
-        
-        var daysToAdd = targetWeekday - currentWeekday
-        if daysToAdd <= 0 || fromNextWeek {
-            daysToAdd += 7
+        let today = calendar.startOfDay(for: Date())
+        let currentFoundationWeekday = calendar.component(.weekday, from: today)
+        let currentISOWeekday = ((currentFoundationWeekday + 5) % 7) + 1
+        let targetISOWeekday = ((targetWeekday + 5) % 7) + 1
+
+        let daysToAdd: Int
+        if fromNextWeek {
+            let daysUntilNextMonday = 8 - currentISOWeekday
+            daysToAdd = daysUntilNextMonday + targetISOWeekday - 1
+        } else {
+            let delta = (targetISOWeekday - currentISOWeekday + 7) % 7
+            daysToAdd = delta == 0 ? 7 : delta
         }
-        if fromNextWeek && daysToAdd <= 7 {
-            daysToAdd += 7
-        }
-        
-        return calendar.date(byAdding: .day, value: daysToAdd, to: calendar.startOfDay(for: today))!
+
+        return calendar.date(byAdding: .day, value: daysToAdd, to: today)!
     }
     
     /// 解析时间（如：下午3点、15:00）
@@ -365,7 +406,57 @@ class NLPParser: ItemParser {
                 return rule
             }
         }
+
+        if text.range(of: #"每\s*\d+\s*天"#, options: .regularExpression) != nil { return .daily }
+        if text.range(of: #"每\s*\d+\s*(周|星期|礼拜)"#, options: .regularExpression) != nil { return .weekly }
+        if text.range(of: #"每\s*\d+\s*(月|个月)"#, options: .regularExpression) != nil { return .monthly }
         return .none
+    }
+
+    private func extractRecurrenceInterval(from text: String) -> Int? {
+        let pattern = #"每\s*(\d+)\s*(天|周|星期|礼拜|月|个月|年)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let range = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        return max(Int(text[range]) ?? 1, 1)
+    }
+
+    private func extractRecurrenceWeekdays(from text: String, recurrence: RecurrenceRule) -> [Int]? {
+        if recurrence == .weekdays { return [1, 2, 3, 4, 5] }
+        guard recurrence == .weekly || recurrence == .biweekly else { return nil }
+
+        let values = weekdayKeywords.compactMap { keyword, foundationWeekday -> Int? in
+            guard text.contains(keyword) else { return nil }
+            return ((foundationWeekday + 5) % 7) + 1
+        }
+        let unique = Array(Set(values)).sorted()
+        return unique.isEmpty ? nil : unique
+    }
+
+    private func extractAlertSettings(
+        from text: String,
+        type: ItemType,
+        isAllDay: Bool
+    ) -> (enabled: Bool?, offsetMinutes: Int?) {
+        if ["不提醒", "无需提醒", "不要通知", "无通知"].contains(where: { text.contains($0) }) {
+            return (false, nil)
+        }
+
+        let pattern = #"提前\s*(\d+)\s*(分钟|分|小时|天)"#
+        if let regex = try? NSRegularExpression(pattern: pattern),
+           let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+           let valueRange = Range(match.range(at: 1), in: text),
+           let unitRange = Range(match.range(at: 2), in: text),
+           let value = Int(text[valueRange]) {
+            let unit = String(text[unitRange])
+            let multiplier = unit == "天" ? 1440 : (unit == "小时" ? 60 : 1)
+            return (true, -(value * multiplier))
+        }
+
+        if isAllDay { return (false, nil) }
+        return (true, type == .calendar ? -15 : 0)
     }
     
     // MARK: - 类型判断

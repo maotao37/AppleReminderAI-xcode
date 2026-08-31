@@ -63,10 +63,14 @@ struct SettingsView: View {
                         .cornerRadius(8)
                         
                         if !settings.isOpenAIConfigured {
-                            Label("请配置 API Key 以使用 AI 解析功能", systemImage: "exclamationmark.triangle.fill")
+                            Label("请检查 API Key 和服务地址；远程地址必须使用 HTTPS", systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption)
                                 .foregroundColor(.orange)
                         }
+
+                        Label("AI 解析会将输入内容和现有分组名称发送到所配置的服务端。API Key 存储在系统钥匙串中。", systemImage: "hand.raised.fill")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                     
                     
@@ -81,6 +85,7 @@ struct SettingsView: View {
                                 icon: permissionManager.statusIcon(for: permissionManager.reminderStatus),
                                 color: permissionManager.statusColorName(for: permissionManager.reminderStatus),
                                 description: permissionManager.statusDescription(for: permissionManager.reminderStatus),
+                                settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders",
                                 onRequest: {
                                     Task { try? await permissionManager.requestReminderAccess() }
                                 }
@@ -92,6 +97,7 @@ struct SettingsView: View {
                                 icon: permissionManager.statusIcon(for: permissionManager.calendarStatus),
                                 color: permissionManager.statusColorName(for: permissionManager.calendarStatus),
                                 description: permissionManager.statusDescription(for: permissionManager.calendarStatus),
+                                settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars",
                                 onRequest: {
                                     Task { try? await permissionManager.requestCalendarAccess() }
                                 }
@@ -106,7 +112,7 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("苹果提醒事项 AI 助手")
                                 .fontWeight(.semibold)
-                            Text("版本 1.0.0")
+                            Text("版本 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-")")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Text("作者: mao.tao")
@@ -169,6 +175,7 @@ struct PermissionRow: View {
     let icon: String
     let color: String
     let description: String
+    let settingsURL: String
     let onRequest: () -> Void
     
     var body: some View {
@@ -196,7 +203,9 @@ struct PermissionRow: View {
                 .controlSize(.small)
             } else if status == .denied || status == .restricted {
                 Button("去设置") {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")!)
+                    if let url = URL(string: settingsURL) {
+                        NSWorkspace.shared.open(url)
+                    }
                 }
                 .buttonStyle(BorderedButtonStyle())
                 .controlSize(.small)
