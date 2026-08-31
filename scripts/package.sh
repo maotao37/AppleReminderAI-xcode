@@ -13,6 +13,17 @@ ENTITLEMENTS_FILE="$ROOT_DIR/AppleReminderAI-xcode/AppleReminderAI.entitlements"
 
 ARCH="${ARCH:-$(uname -m)}"
 CONFIGURATION="${CONFIGURATION:-Release}"
+
+if [[ "$ARCH" != "arm64" && "$ARCH" != "x86_64" ]]; then
+  echo "[package] 不支持的架构: $ARCH" >&2
+  exit 2
+fi
+
+if [[ ! "$CONFIGURATION" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "[package] 无效的构建配置名: $CONFIGURATION" >&2
+  exit 2
+fi
+
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
 BUILD_DIR="$ROOT_DIR/.build/${ARCH}-apple-macosx/${CONFIGURATION}"
 APP_DIR="$DIST_DIR/${APP_NAME}.app"
@@ -45,8 +56,10 @@ DMG_PATH="$DIST_DIR/${APP_NAME}-${VERSION}-${ARCH}.dmg"
 
 printf '[package] 开始构建 %s %s (%s)\n' "$APP_NAME" "$VERSION" "$ARCH"
 
-# 创建输出目录
-mkdir -p "$DIST_DIR" "$BUILD_DIR"
+# 清理当前架构产物；CONFIGURATION_BUILD_DIR 必须由 Xcode 自行创建。
+# 否则 Xcode 26 的 clean 会拒绝删除没有 CreatedByBuildSystem 标记的目录。
+mkdir -p "$DIST_DIR"
+rm -rf "$BUILD_DIR"
 
 # 执行 xcodebuild 编译指定架构。
 # Xcode 26 在完全禁用签名时可能在执行策略/元数据阶段返回 65。
@@ -70,9 +83,9 @@ if ! xcodebuild \
   DEVELOPMENT_TEAM="" \
   PROVISIONING_PROFILE_SPECIFIER="" \
   CONFIGURATION_BUILD_DIR="$BUILD_DIR" \
-  clean build 2>&1 | tee "$BUILD_LOG"; then
+  build 2>&1 | tee "$BUILD_LOG"; then
   echo "[package] xcodebuild 构建失败，提取关键错误:" >&2
-  grep -Eni "error:|fatal error:|failed|BUILD FAILED" "$BUILD_LOG" >&2 || true
+  grep -Eni "error:|fatal error:|\*\* (CLEAN|BUILD) FAILED|The following build commands failed" "$BUILD_LOG" >&2 || true
   exit 65
 fi
 
