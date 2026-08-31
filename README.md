@@ -48,6 +48,12 @@ open AppleReminderAI-xcode.xcodeproj
 
 3. 选择你的开发团队并编译运行
 
+### 📦 本地打包与发布
+
+- **本地快速打包 DMG**：执行 `make package`（详见 [local_pack.md](local_pack.md)）
+- **GitHub 自动化发布**：向仓库推送 `v*` Tag 或在 GitHub 页面发布 Release 时，GitHub Actions 会自动编译并发布 `arm64` 与 `x86_64` 两个架构的 DMG 安装包。
+
+
 ## 🚀 使用方法
 
 ### 基本使用

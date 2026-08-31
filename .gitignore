@@ -21,12 +21,16 @@ playground.xcworkspace
 .build/
 .swiftpm/
 
-# Xcode Scheme
-*.xcscheme
+# Xcode Scheme (允许提交共享 Scheme)
+!xcshareddata/
+!xcshareddata/xcschemes/
+!xcshareddata/xcschemes/*.xcscheme
 
-# CocoaPods
-Pods/
-Podfile.lock
+# Build & Dist Outputs
+dist/
+*.dmg
+build/
+DerivedData/
 
 # Carthage
 Carthage/Build/
