@@ -1,15 +1,12 @@
 # 作者: mao.tao
 # 说明: GitHub Release 自动编译打包流水线
 # 触发条件:
-#   1. 在 GitHub 发布 Release
-#   2. 向仓库推送以 v 开头的 Tag（例如 v1.0.0）
-#   3. 在 Actions 页面手动运行 (workflow_dispatch)
+#   1. 向仓库推送以 v 开头的 Tag（包括在 GitHub 发布新 Tag 的 Release）
+#   2. 在 Actions 页面手动运行 (workflow_dispatch)
 
 name: Release
 
 on:
-  release:
-    types: [published]
   push:
     tags:
       - 'v*'
@@ -47,8 +44,6 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ github.event.inputs.version }}"
-          elif [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
           else
             TAG="${{ github.ref_name }}"
           fi
@@ -63,7 +58,15 @@ jobs:
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           chmod +x ./scripts/package.sh
-          bash -x ./scripts/package.sh
+          ./scripts/package.sh
+
+      - name: 上传失败构建日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log-${{ matrix.arch }}
+          path: dist/xcodebuild-${{ matrix.arch }}.log
+          if-no-files-found: warn
 
       - name: 生成 SHA256 校验文件
         run: |
@@ -93,8 +96,6 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ github.event.inputs.version }}"
-          elif [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
           else
             TAG="${{ github.ref_name }}"
           fi

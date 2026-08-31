@@ -17,6 +17,7 @@ DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
 BUILD_DIR="$ROOT_DIR/.build/${ARCH}-apple-macosx/${CONFIGURATION}"
 APP_DIR="$DIST_DIR/${APP_NAME}.app"
 STAGING_DIR="$DIST_DIR/.dmg-staging-${ARCH}"
+BUILD_LOG="$DIST_DIR/xcodebuild-${ARCH}.log"
 
 # 解析版本号
 resolve_version() {
@@ -47,8 +48,10 @@ printf '[package] 开始构建 %s %s (%s)\n' "$APP_NAME" "$VERSION" "$ARCH"
 # 创建输出目录
 mkdir -p "$DIST_DIR" "$BUILD_DIR"
 
-# 执行 xcodebuild 编译指定架构
-xcodebuild \
+# 执行 xcodebuild 编译指定架构。
+# Xcode 26 在完全禁用签名时可能在执行策略/元数据阶段返回 65。
+# 使用系统提供的 Ad-Hoc 身份（-）无需证书或开发团队，同时保持产物可验证。
+if ! xcodebuild \
   -project "$PROJECT_FILE" \
   -scheme "$SCHEME_NAME" \
   -configuration "$CONFIGURATION" \
@@ -59,14 +62,19 @@ xcodebuild \
   CURRENT_PROJECT_VERSION="$VERSION" \
   MACOSX_DEPLOYMENT_TARGET="14.0" \
   CODE_SIGN_STYLE="Manual" \
-  CODE_SIGNING_ALLOWED=NO \
+  AD_HOC_CODE_SIGNING_ALLOWED=YES \
+  CODE_SIGNING_ALLOWED=YES \
   CODE_SIGNING_REQUIRED=NO \
-  CODE_SIGN_IDENTITY="" \
+  CODE_SIGN_IDENTITY="-" \
   CODE_SIGN_ENTITLEMENTS="" \
   DEVELOPMENT_TEAM="" \
   PROVISIONING_PROFILE_SPECIFIER="" \
   CONFIGURATION_BUILD_DIR="$BUILD_DIR" \
-  clean build
+  clean build 2>&1 | tee "$BUILD_LOG"; then
+  echo "[package] xcodebuild 构建失败，提取关键错误:" >&2
+  grep -Eni "error:|fatal error:|failed|BUILD FAILED" "$BUILD_LOG" >&2 || true
+  exit 65
+fi
 
 BUILT_APP="$BUILD_DIR/AppleReminderAI-xcode.app"
 
@@ -95,11 +103,13 @@ if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
 else
   printf '[package] 执行本地 Ad-Hoc 签名\n'
   if [[ -f "$ENTITLEMENTS_FILE" ]]; then
-    codesign --force --deep --entitlements "$ENTITLEMENTS_FILE" --sign - "$APP_DIR" || true
+    codesign --force --deep --entitlements "$ENTITLEMENTS_FILE" --sign - "$APP_DIR"
   else
-    codesign --force --deep --sign - "$APP_DIR" || true
+    codesign --force --deep --sign - "$APP_DIR"
   fi
 fi
+
+codesign --verify --deep --strict "$APP_DIR"
 
 # 准备 DMG 打包暂存目录
 rm -rf "$STAGING_DIR"
