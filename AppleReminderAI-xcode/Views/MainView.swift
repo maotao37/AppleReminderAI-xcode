@@ -190,6 +190,9 @@ struct MainView: View {
                             onUpdateItem: { item, index in
                                 viewModel.updateParsedItem(item, at: index)
                             },
+                            onSetItemType: { type, index in
+                                viewModel.setItemType(type, at: index)
+                            },
                             isCreating: viewModel.isCreating,
                             creationProgress: viewModel.creationProgress,
                             reminderLists: viewModel.reminderLists,

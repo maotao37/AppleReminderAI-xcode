@@ -27,6 +27,9 @@ struct ParsedItemsListView: View {
     
     /// 更新事项回调
     var onUpdateItem: (ParsedItem, Int) -> Void
+
+    /// 设置事项类型回调（提醒事项/日历事件切换）
+    var onSetItemType: (ItemType, Int) -> Void
     
     /// 是否正在创建
     var isCreating: Bool
@@ -110,6 +113,7 @@ struct ParsedItemsListView: View {
                             },
                             onConfirm: { onCreateItem(index) },
                             onRemove: { onRemoveItem(index) },
+                            onSetType: { newType in onSetItemType(newType, index) },
                             isCreating: isCreating,
                             reminderLists: reminderLists,
                             calendars: calendars,
@@ -133,6 +137,8 @@ struct ParsedItemCardView: View {
     var onToggleExpand: () -> Void
     var onConfirm: () -> Void
     var onRemove: () -> Void
+    /// 类型切换回调：由外部（ViewModel）单次原子处理，避免内联多重写回
+    var onSetType: (ItemType) -> Void
     var isCreating: Bool
     
     var reminderLists: [EKCalendar]
@@ -245,19 +251,10 @@ struct ParsedItemCardView: View {
                         
                         Picker("", selection: Binding(
                             get: { item.type },
-                            set: { newType in
-                                item.type = newType
-                                item.targetGroupIdentifier = newType == .reminder
-                                    ? selectedReminderList?.calendarIdentifier
-                                    : selectedCalendar?.calendarIdentifier
-                                item.targetGroupName = newType == .reminder
-                                    ? selectedReminderList?.title
-                                    : selectedCalendar?.title
-                                item = ScheduleNormalizer.normalize(item)
-                            }
+                            set: { newType in onSetType(newType) }
                         )) {
                             ForEach(ItemType.allCases, id: \.self) { type in
-                                Label(type.rawValue, systemImage: type.icon).tag(type)
+                                Text(type.rawValue).tag(type)
                             }
                         }
                         .pickerStyle(SegmentedPickerStyle())

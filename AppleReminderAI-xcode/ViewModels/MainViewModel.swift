@@ -495,11 +495,11 @@ class MainViewModel: ObservableObject {
         parsedItems[index] = ScheduleNormalizer.normalize(item)
     }
     
-    /// 切换指定索引事项的类型
-    /// - Parameter index: 事项索引
-    func toggleItemType(at index: Int) {
+    /// 设置指定索引事项的类型（提醒事项/日历事件）
+    /// 单次原子更新：切换类型 → 重置分组 → 归一化 → 重新自动分组
+    func setItemType(_ newType: ItemType, at index: Int) {
         guard index >= 0 && index < parsedItems.count else { return }
-        parsedItems[index].type = parsedItems[index].type == .reminder ? .calendar : .reminder
+        parsedItems[index].type = newType
         parsedItems[index].targetGroupIdentifier = nil
         parsedItems[index].targetGroupName = nil
         parsedItems[index] = assignGroup(ScheduleNormalizer.normalize(parsedItems[index]))
