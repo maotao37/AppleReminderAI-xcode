@@ -53,21 +53,33 @@ struct ParsedItemsListView: View {
     @State private var expandedIndex: Int? = nil
     
     var body: some View {
-        VStack(spacing: 16) {
-            // 顶部标题和批量操作
-            HStack {
-                Label(L10n.Main.parseResultCount(items.count), systemImage: "list.bullet.rectangle")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
+        VStack(spacing: 12) {
+            // 顶部标题和批量操作工具栏
+            HStack(alignment: .center) {
+                // 结果数量提示标签
+                HStack(spacing: 6) {
+                    Image(systemName: "list.bullet.rectangle.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(.accentColor)
+                    Text(L10n.Main.parseResultCount(items.count))
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundColor(.primary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(Color.primary.opacity(0.04))
+                )
                 
                 Spacer()
                 
-                // 全部创建按钮
+                // 全部创建操作按钮
                 if items.count > 1 {
                     Button {
                         onCreateAll()
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 5) {
                             if isCreating {
                                 ProgressView()
                                     .controlSize(.small)
@@ -79,25 +91,29 @@ struct ParsedItemsListView: View {
                                 }
                             } else {
                                 Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 11, weight: .semibold))
                                 Text(L10n.ParsedList.createAll)
+                                
+                                // 快捷键提示
+                                Text("⇧⌘↩")
+                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Color.white.opacity(0.2))
+                                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                             }
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.green)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
                     }
-                    .buttonStyle(PlainButtonStyle())
+                    .buttonStyle(MacOS27PrimaryButtonStyle(gradient: MacOS27Theme.successGradient))
                     .disabled(isCreating)
                     .keyboardShortcut(.return, modifiers: [.command, .shift])
                 }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 16)
             
-            // 事项列表
+            // 事项卡片滚动列表
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(spacing: 10) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         ParsedItemCardView(
                             item: Binding(
@@ -107,7 +123,7 @@ struct ParsedItemsListView: View {
                             index: index,
                             isExpanded: expandedIndex == index,
                             onToggleExpand: {
-                                withAnimation(.spring(response: 0.3)) {
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
                                     expandedIndex = expandedIndex == index ? nil : index
                                 }
                             },
@@ -122,7 +138,7 @@ struct ParsedItemsListView: View {
                         )
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 16)
                 .padding(.bottom, 16)
             }
         }
@@ -137,7 +153,6 @@ struct ParsedItemCardView: View {
     var onToggleExpand: () -> Void
     var onConfirm: () -> Void
     var onRemove: () -> Void
-    /// 类型切换回调：由外部（ViewModel）单次原子处理，避免内联多重写回
     var onSetType: (ItemType) -> Void
     var isCreating: Bool
     
@@ -148,43 +163,67 @@ struct ParsedItemCardView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 卡片头部：摘要信息
-            HStack {
-                // 类型图标
-                Image(systemName: item.type.icon)
-                    .foregroundColor(item.type == .calendar ? .orange : .blue)
-                    .font(.title3)
+            // 卡片头部：摘要展示与快捷操作
+            HStack(spacing: 12) {
+                // 类型立体微图标
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(item.type == .calendar ? MacOS27Theme.calendarGradient : MacOS27Theme.reminderGradient)
+                        .frame(width: 32, height: 32)
+                        .shadow(
+                            color: (item.type == .calendar ? Color.orange : Color.blue).opacity(0.25),
+                            radius: 3,
+                            x: 0,
+                            y: 1.5
+                        )
+                    
+                    Image(systemName: item.type.icon)
+                        .foregroundColor(.white)
+                        .font(.system(size: 14, weight: .semibold))
+                }
                 
-                VStack(alignment: .leading, spacing: 2) {
-                    // 标题
+                // 核心标题与状态标签
+                VStack(alignment: .leading, spacing: 4) {
                     Text(item.title)
-                        .font(.headline)
+                        .font(.system(size: 13.5, weight: .semibold, design: .rounded))
                         .lineLimit(1)
                     
-                    // 时间信息
-                    HStack(spacing: 8) {
+                    // 属性徽标集群
+                    HStack(spacing: 6) {
                         if item.dueDate != nil {
-                            Text(item.type == .calendar ? item.formattedDateRange : item.formattedDueDate)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                            MacOS27Badge(
+                                text: item.type == .calendar ? item.formattedDateRange : item.formattedDueDate,
+                                icon: "clock",
+                                foregroundColor: .secondary,
+                                backgroundColor: Color.primary.opacity(0.05)
+                            )
                         }
                         
                         if item.recurrence != .none {
-                            Label(item.recurrenceSummary, systemImage: item.recurrence.icon)
-                                .font(.caption2)
-                                .foregroundColor(.purple)
+                            MacOS27Badge(
+                                text: item.recurrenceSummary,
+                                icon: item.recurrence.icon,
+                                foregroundColor: Color(red: 0.65, green: 0.35, blue: 0.95),
+                                backgroundColor: Color.purple.opacity(0.08)
+                            )
                         }
 
                         if let groupName = item.targetGroupName {
-                            Label(groupName, systemImage: "folder.fill")
-                                .font(.caption2)
-                                .foregroundColor(.teal)
+                            MacOS27Badge(
+                                text: groupName,
+                                icon: "folder.fill",
+                                foregroundColor: Color(red: 0.10, green: 0.65, blue: 0.70),
+                                backgroundColor: Color.teal.opacity(0.08)
+                            )
                         }
 
                         if item.confidence < 0.7 {
-                            Label(L10n.ParsedList.lowConfidence, systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption2)
-                                .foregroundColor(.orange)
+                            MacOS27Badge(
+                                text: L10n.ParsedList.lowConfidence,
+                                icon: "exclamationmark.triangle.fill",
+                                foregroundColor: Color.orange,
+                                backgroundColor: Color.orange.opacity(0.08)
+                            )
                         }
                     }
                 }
@@ -192,41 +231,49 @@ struct ParsedItemCardView: View {
                 Spacer()
                 
                 // 操作按钮组
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     // 删除按钮
                     Button {
                         onRemove()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.secondary)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
                     }
-                    .buttonStyle(PlainButtonStyle())
+                    .buttonStyle(MacOS27CircleIconButtonStyle(
+                        tintColor: .secondary,
+                        activeTintColor: Color(red: 0.95, green: 0.30, blue: 0.35),
+                        diameter: 26
+                    ))
                     .help(L10n.Common.remove)
                     
-                    // 展开/收起按钮
+                    // 展开/收起详情按钮
                     Button {
                         onToggleExpand()
                     } label: {
-                        Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
-                            .foregroundColor(.secondary)
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
                     }
-                    .buttonStyle(PlainButtonStyle())
+                    .buttonStyle(MacOS27CircleIconButtonStyle(diameter: 26))
                     .help(isExpanded ? L10n.Common.collapseEdit : L10n.Common.expandEdit)
                     
-                    // 快速创建按钮
+                    // 快速创建确认按钮
                     Button {
                         onConfirm()
                     } label: {
                         if isCreating {
                             ProgressView()
                                 .controlSize(.small)
-                                .scaleEffect(0.7)
+                                .scaleEffect(0.65)
                         } else {
-                            Image(systemName: "plus.circle.fill")
-                                .foregroundColor(.green)
+                            Image(systemName: "plus")
+                                .font(.system(size: 12, weight: .bold))
                         }
                     }
-                    .buttonStyle(PlainButtonStyle())
+                    .buttonStyle(MacOS27CircleIconButtonStyle(
+                        tintColor: Color(red: 0.15, green: 0.75, blue: 0.45),
+                        activeTintColor: .white,
+                        diameter: 26
+                    ))
                     .disabled(isCreating)
                     .help(L10n.Common.createThisItem)
                 }
@@ -237,17 +284,19 @@ struct ParsedItemCardView: View {
                 onToggleExpand()
             }
             
-            // 展开的编辑区域
+            // 展开状态的详细编辑面板
             if isExpanded {
                 Divider()
-                    .padding(.horizontal)
+                    .opacity(0.5)
+                    .padding(.horizontal, 10)
                 
-                VStack(alignment: .leading, spacing: 12) {
-                    // 类型切换
-                    HStack {
+                VStack(alignment: .leading, spacing: 14) {
+                    // 类型分段控制器
+                    HStack(spacing: 12) {
                         Text(L10n.ParsedList.type)
-                            .font(.caption)
+                            .font(.system(size: 11.5, weight: .medium))
                             .foregroundColor(.secondary)
+                            .frame(width: 50, alignment: .leading)
                         
                         Picker("", selection: Binding(
                             get: { item.type },
@@ -258,187 +307,228 @@ struct ParsedItemCardView: View {
                             }
                         }
                         .pickerStyle(SegmentedPickerStyle())
-                        .frame(width: 160)
+                        .frame(width: 170)
                     }
                     
-                    // 标题编辑
+                    // 标题编辑行
                     VStack(alignment: .leading, spacing: 4) {
                         Text(L10n.ParsedList.titleField)
-                            .font(.caption)
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundColor(.secondary)
+                        
                         TextField(L10n.ParsedList.titlePlaceholder, text: $item.title)
                             .textFieldStyle(PlainTextFieldStyle())
-                            .padding(8)
-                            .background(Color.secondary.opacity(0.1))
-                            .cornerRadius(6)
+                            .font(.system(size: 12.5, weight: .regular))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(Color(NSColor.textBackgroundColor).opacity(0.6))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .stroke(Color.primary.opacity(0.1), lineWidth: 0.6)
+                            )
                     }
                     
-                    // 时间选择
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 16)], alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.type == .calendar ? L10n.ParsedList.startTime : L10n.ParsedList.reminderTime)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            
-                            DatePicker("", selection: Binding(
-                                get: { item.dueDate ?? Date() },
-                                set: {
-                                    item.dueDate = $0
-                                    item = ScheduleNormalizer.normalize(item)
-                                }
-                            ), displayedComponents: item.isAllDay ? [.date] : [.date, .hourAndMinute])
-                            .labelsHidden()
-                            .datePickerStyle(.stepperField)
-                        }
-                        
-                        if item.type == .calendar {
+                    // 时间配置面板模块
+                    VStack(alignment: .leading, spacing: 8) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 14)], alignment: .leading, spacing: 10) {
+                            // 开始/提醒时间
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(L10n.ParsedList.endTime)
-                                    .font(.caption)
+                                Text(item.type == .calendar ? L10n.ParsedList.startTime : L10n.ParsedList.reminderTime)
+                                    .font(.system(size: 11, weight: .medium))
                                     .foregroundColor(.secondary)
                                 
                                 DatePicker("", selection: Binding(
-                                    get: { item.endDate ?? (item.dueDate?.addingTimeInterval(3600) ?? Date()) },
+                                    get: { item.dueDate ?? Date() },
                                     set: {
-                                        item.endDate = $0
+                                        item.dueDate = $0
                                         item = ScheduleNormalizer.normalize(item)
                                     }
                                 ), displayedComponents: item.isAllDay ? [.date] : [.date, .hourAndMinute])
                                 .labelsHidden()
                                 .datePickerStyle(.stepperField)
                             }
-                        }
-                        
-                        // 全天切换
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(L10n.ParsedList.allDay)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Toggle("", isOn: Binding(
-                                get: { item.isAllDay },
-                                set: { item = ScheduleNormalizer.settingAllDay($0, for: item) }
-                            ))
+                            
+                            // 结束时间（日历专属）
+                            if item.type == .calendar {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(L10n.ParsedList.endTime)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.secondary)
+                                    
+                                    DatePicker("", selection: Binding(
+                                        get: { item.endDate ?? (item.dueDate?.addingTimeInterval(3600) ?? Date()) },
+                                        set: {
+                                            item.endDate = $0
+                                            item = ScheduleNormalizer.normalize(item)
+                                        }
+                                    ), displayedComponents: item.isAllDay ? [.date] : [.date, .hourAndMinute])
+                                    .labelsHidden()
+                                    .datePickerStyle(.stepperField)
+                                }
+                            }
+                            
+                            // 全天开关
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(L10n.ParsedList.allDay)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                
+                                Toggle("", isOn: Binding(
+                                    get: { item.isAllDay },
+                                    set: { item = ScheduleNormalizer.settingAllDay($0, for: item) }
+                                ))
                                 .labelsHidden()
                                 .toggleStyle(SwitchToggleStyle())
+                            }
                         }
                     }
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.primary.opacity(0.025))
+                    )
                     
-                    // 重复、提醒和优先级
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 16)], alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(L10n.ParsedList.recurrence)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Picker("", selection: $item.recurrence) {
-                                ForEach(RecurrenceRule.allCases, id: \.self) { rule in
-                                    Text(rule.rawValue).tag(rule)
-                                }
-                            }
-                            .frame(width: 100)
-                        }
-
-                        if item.recurrence != .none && item.recurrence != .weekdays && item.recurrence != .biweekly {
-                            Stepper(
-                                L10n.ParsedList.interval(item.recurrenceInterval ?? 1),
-                                value: Binding(
-                                    get: { item.recurrenceInterval ?? 1 },
-                                    set: { item.recurrenceInterval = $0 }
-                                ),
-                                in: 1...30
-                            )
-                            .font(.caption)
-                            .frame(width: 100)
-                        }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(L10n.ParsedList.alert)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Toggle("", isOn: Binding(
-                                get: { ScheduleNormalizer.isAlertEnabled(for: item) },
-                                set: {
-                                    item.alertEnabled = $0
-                                    if $0 && item.alertOffsetMinutes == nil {
-                                        item.alertOffsetMinutes = ScheduleNormalizer.defaultAlertOffset(for: item)
+                    // 重复周期与优先级配置
+                    VStack(alignment: .leading, spacing: 8) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 14)], alignment: .leading, spacing: 10) {
+                            // 循环规则
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(L10n.ParsedList.recurrence)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                
+                                Picker("", selection: $item.recurrence) {
+                                    ForEach(RecurrenceRule.allCases, id: \.self) { rule in
+                                        Text(rule.rawValue).tag(rule)
                                     }
                                 }
-                            ))
-                            .labelsHidden()
+                                .frame(width: 100)
+                            }
+
+                            if item.recurrence != .none && item.recurrence != .weekdays && item.recurrence != .biweekly {
+                                Stepper(
+                                    L10n.ParsedList.interval(item.recurrenceInterval ?? 1),
+                                    value: Binding(
+                                        get: { item.recurrenceInterval ?? 1 },
+                                        set: { item.recurrenceInterval = $0 }
+                                    ),
+                                    in: 1...30
+                                )
+                                .font(.system(size: 11))
+                                .frame(width: 100)
+                            }
+
+                            // 预警通知开关
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(L10n.ParsedList.alert)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                
+                                Toggle("", isOn: Binding(
+                                    get: { ScheduleNormalizer.isAlertEnabled(for: item) },
+                                    set: {
+                                        item.alertEnabled = $0
+                                        if $0 && item.alertOffsetMinutes == nil {
+                                            item.alertOffsetMinutes = ScheduleNormalizer.defaultAlertOffset(for: item)
+                                        }
+                                    }
+                                ))
+                                .labelsHidden()
+                            }
+
+                            // 预警提前量
+                            if ScheduleNormalizer.isAlertEnabled(for: item), item.dueDate != nil {
+                                Picker("", selection: Binding(
+                                    get: { item.alertOffsetMinutes ?? ScheduleNormalizer.defaultAlertOffset(for: item) },
+                                    set: { item.alertOffsetMinutes = $0 }
+                                )) {
+                                    Text(L10n.ParsedList.alertOnTime).tag(0)
+                                    Text(L10n.ParsedList.minutesEarly(5)).tag(-5)
+                                    Text(L10n.ParsedList.minutesEarly(15)).tag(-15)
+                                    Text(L10n.ParsedList.minutesEarly(30)).tag(-30)
+                                    Text(L10n.ParsedList.alertEarly1Hour).tag(-60)
+                                    Text(L10n.ParsedList.alertEarly1Day).tag(-1440)
+                                }
+                                .frame(width: 110)
+                            }
+                            
+                            // 优先级
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(L10n.ParsedList.priority)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                
+                                Picker("", selection: Binding(
+                                    get: { item.priority },
+                                    set: { item.priority = $0 }
+                                )) {
+                                    ForEach(Priority.allCases, id: \.self) { priority in
+                                        Text(priority.displayName).tag(priority)
+                                    }
+                                }
+                                .frame(width: 80)
+                            }
                         }
 
-                        if ScheduleNormalizer.isAlertEnabled(for: item), item.dueDate != nil {
-                            Picker("", selection: Binding(
-                                get: { item.alertOffsetMinutes ?? ScheduleNormalizer.defaultAlertOffset(for: item) },
-                                set: { item.alertOffsetMinutes = $0 }
-                            )) {
-                                Text(L10n.ParsedList.alertOnTime).tag(0)
-                                Text(L10n.ParsedList.minutesEarly(5)).tag(-5)
-                                Text(L10n.ParsedList.minutesEarly(15)).tag(-15)
-                                Text(L10n.ParsedList.minutesEarly(30)).tag(-30)
-                                Text(L10n.ParsedList.alertEarly1Hour).tag(-60)
-                                Text(L10n.ParsedList.alertEarly1Day).tag(-1440)
-                            }
-                            .frame(width: 120)
+                        // 按星期重复
+                        if item.recurrence == .weekly {
+                            WeekdaySelectionView(selection: Binding(
+                                get: { item.recurrenceWeekdays ?? [] },
+                                set: { item.recurrenceWeekdays = $0 }
+                            ))
+                            .padding(.top, 2)
                         }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(L10n.ParsedList.priority)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Picker("", selection: Binding(
-                                get: { item.priority },
-                                set: { item.priority = $0 }
-                            )) {
-                                ForEach(Priority.allCases, id: \.self) { priority in
-                                    Text(priority.displayName).tag(priority)
+
+                        // 每月重复细节
+                        if item.recurrence == .monthly {
+                            MonthlyRecurrenceEditor(item: $item)
+                                .padding(.top, 2)
+                        }
+
+                        // 每年重复细节
+                        if item.recurrence == .yearly {
+                            YearlyRecurrenceEditor(item: $item)
+                                .padding(.top, 2)
+                        }
+
+                        // 重复截止日期
+                        if item.recurrence != .none {
+                            HStack {
+                                Toggle(L10n.ParsedList.recurrenceEndToggle, isOn: Binding(
+                                    get: { item.recurrenceEndDate != nil },
+                                    set: { item.recurrenceEndDate = $0 ? (item.dueDate ?? Date()) : nil }
+                                ))
+                                .font(.system(size: 11))
+
+                                if let recurrenceEndDate = item.recurrenceEndDate {
+                                    DatePicker(L10n.ParsedList.recurrenceEnd, selection: Binding(
+                                        get: { recurrenceEndDate },
+                                        set: { item.recurrenceEndDate = $0 }
+                                    ), displayedComponents: .date)
+                                    .datePickerStyle(.stepperField)
                                 }
                             }
-                            .frame(width: 80)
+                            .padding(.top, 2)
                         }
                     }
-
-                    if item.recurrence == .weekly {
-                        WeekdaySelectionView(selection: Binding(
-                            get: { item.recurrenceWeekdays ?? [] },
-                            set: { item.recurrenceWeekdays = $0 }
-                        ))
-                    }
-
-                    // "每月15号" / "每月最后一个周五" 细节编辑
-                    if item.recurrence == .monthly {
-                        MonthlyRecurrenceEditor(item: $item)
-                    }
-
-                    // "每年3月5日" 细节编辑
-                    if item.recurrence == .yearly {
-                        YearlyRecurrenceEditor(item: $item)
-                    }
-
-                    if item.recurrence != .none {
-                        Toggle(L10n.ParsedList.recurrenceEndToggle, isOn: Binding(
-                            get: { item.recurrenceEndDate != nil },
-                            set: { item.recurrenceEndDate = $0 ? (item.dueDate ?? Date()) : nil }
-                        ))
-                        .font(.caption)
-
-                        if let recurrenceEndDate = item.recurrenceEndDate {
-                            DatePicker(L10n.ParsedList.recurrenceEnd, selection: Binding(
-                                get: { recurrenceEndDate },
-                                set: { item.recurrenceEndDate = $0 }
-                            ), displayedComponents: .date)
-                            .datePickerStyle(.stepperField)
-                        }
-                    }
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.primary.opacity(0.025))
+                    )
                     
-                    // 目标列表选择
+                    // 存储目标列表选择
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.type == .reminder ? L10n.ParsedList.saveToReminderList : L10n.ParsedList.saveToCalendar)
-                            .font(.caption)
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundColor(.secondary)
                         
                         if availableGroups.isEmpty {
-                            Label(L10n.ParsedList.permissionPendingGroup, systemImage: "lock")
-                                .font(.caption)
+                            Label(L10n.ParsedList.permissionPendingGroup, systemImage: "lock.fill")
+                                .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         } else {
                             Picker("", selection: targetGroupBinding) {
@@ -449,55 +539,62 @@ struct ParsedItemCardView: View {
                         }
                     }
 
+                    // 备注输入框
                     VStack(alignment: .leading, spacing: 4) {
                         Text(L10n.ParsedList.notes)
-                            .font(.caption)
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundColor(.secondary)
+                        
                         TextField(L10n.Common.optional, text: Binding(
                             get: { item.notes ?? "" },
                             set: { item.notes = $0.isEmpty ? nil : $0 }
                         ))
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .font(.system(size: 12))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color(NSColor.textBackgroundColor).opacity(0.5))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(Color.primary.opacity(0.08), lineWidth: 0.6)
+                        )
                     }
 
                     if item.type == .calendar && item.dueDate == nil {
                         Label(L10n.ParsedList.calendarNeedsDate, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
+                            .font(.system(size: 11))
                             .foregroundColor(.orange)
                     }
                     
-                    // 确认创建按钮
+                    // 确认创建主操作按钮
                     Button {
                         onConfirm()
                     } label: {
-                        HStack {
+                        HStack(spacing: 6) {
                             if isCreating {
-                                ProgressView().controlSize(.small).padding(.trailing, 4)
+                                ProgressView()
+                                    .controlSize(.small)
                             } else {
                                 Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 13, weight: .semibold))
                             }
                             Text(L10n.ParsedList.confirmCreate(typeName: item.type.rawValue))
-                                .fontWeight(.semibold)
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
                     }
-                    .buttonStyle(PlainButtonStyle())
+                    .buttonStyle(MacOS27PrimaryButtonStyle(
+                        gradient: item.type == .calendar ? MacOS27Theme.calendarGradient : MacOS27Theme.primaryGradient,
+                        isFullWidth: true
+                    ))
                     .disabled(isCreating || item.title.isEmpty || (item.type == .calendar && item.dueDate == nil))
                 }
-                .padding(12)
+                .padding(14)
             }
         }
-        .background(Color(NSColor.windowBackgroundColor))
-        .cornerRadius(10)
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(isExpanded ? Color.blue.opacity(0.5) : Color.secondary.opacity(0.2), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .macOS27Card(cornerRadius: 12, isSelected: isExpanded)
     }
 
     private var availableGroups: [EKCalendar] {
@@ -520,18 +617,21 @@ struct ParsedItemCardView: View {
     }
 }
 
+/// 星期多选器组件
 private struct WeekdaySelectionView: View {
     @Binding var selection: [Int]
     private let labels = L10n.RecurrenceDisplay.weekdayShort
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Text(L10n.ParsedList.repeatOn)
-                .font(.caption)
+                .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.secondary)
+            
             ForEach(1...7, id: \.self) { day in
+                let isSelected = selection.contains(day)
                 Button {
-                    if selection.contains(day) {
+                    if isSelected {
                         selection.removeAll { $0 == day }
                     } else {
                         selection.append(day)
@@ -539,11 +639,23 @@ private struct WeekdaySelectionView: View {
                     }
                 } label: {
                     Text(labels[day - 1])
-                        .font(.caption)
-                        .frame(width: 24, height: 24)
-                        .background(selection.contains(day) ? Color.accentColor : Color.secondary.opacity(0.12))
-                        .foregroundColor(selection.contains(day) ? .white : .primary)
-                        .clipShape(Circle())
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .frame(width: 26, height: 26)
+                        .background(
+                            Circle()
+                                .fill(isSelected ? MacOS27Theme.primaryGradient : LinearGradient(colors: [Color.primary.opacity(0.06)], startPoint: .top, endPoint: .bottom))
+                        )
+                        .foregroundColor(isSelected ? .white : .primary)
+                        .overlay(
+                            Circle()
+                                .stroke(isSelected ? Color.white.opacity(0.3) : Color.primary.opacity(0.08), lineWidth: 0.5)
+                        )
+                        .shadow(
+                            color: isSelected ? Color.accentColor.opacity(0.28) : Color.clear,
+                            radius: 3,
+                            x: 0,
+                            y: 1
+                        )
                 }
                 .buttonStyle(.plain)
             }
@@ -551,12 +663,11 @@ private struct WeekdaySelectionView: View {
     }
 }
 
-/// 每月重复的细节编辑：按日期（每月15号）或按第 N 个星期几（每月最后一个周五）
+/// 每月重复细节配置
 private struct MonthlyRecurrenceEditor: View {
     @Binding var item: ParsedItem
     private let weekdayLabels = L10n.RecurrenceDisplay.weekdays
 
-    /// 0=仅每月，1=按月内日期，2=按第 N 个星期几
     private var mode: Int {
         if item.recurrenceSetPosition != nil,
            let weekdays = item.recurrenceWeekdays, !weekdays.isEmpty {
@@ -571,7 +682,7 @@ private struct MonthlyRecurrenceEditor: View {
     var body: some View {
         HStack(spacing: 12) {
             Text(L10n.ParsedList.monthlyRule)
-                .font(.caption)
+                .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.secondary)
 
             Picker("", selection: Binding(get: { mode }, set: { switchMode($0) })) {
@@ -580,7 +691,7 @@ private struct MonthlyRecurrenceEditor: View {
                 Text(L10n.ParsedList.monthlyByNthWeekday).tag(2)
             }
             .pickerStyle(MenuPickerStyle())
-            .frame(width: 130)
+            .frame(width: 120)
 
             switch mode {
             case 1:
@@ -592,7 +703,7 @@ private struct MonthlyRecurrenceEditor: View {
                     ),
                     in: 1...31
                 )
-                .font(.caption)
+                .font(.system(size: 11))
 
             case 2:
                 Picker("", selection: Binding(
@@ -621,7 +732,7 @@ private struct MonthlyRecurrenceEditor: View {
                 EmptyView()
             }
         }
-        .font(.caption)
+        .font(.system(size: 11))
     }
 
     private func switchMode(_ newMode: Int) {
@@ -642,15 +753,16 @@ private struct MonthlyRecurrenceEditor: View {
     }
 }
 
-/// 每年重复的细节编辑：每年几月几日
+/// 每年重复细节配置
 private struct YearlyRecurrenceEditor: View {
     @Binding var item: ParsedItem
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 14) {
             Text(L10n.ParsedList.yearlyOn)
-                .font(.caption)
+                .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.secondary)
+            
             Stepper(
                 L10n.ParsedList.monthNumber(item.recurrenceMonthsOfYear?.first ?? 3),
                 value: Binding(
@@ -659,6 +771,8 @@ private struct YearlyRecurrenceEditor: View {
                 ),
                 in: 1...12
             )
+            .font(.system(size: 11))
+            
             Stepper(
                 L10n.ParsedList.dayNumber(item.recurrenceDaysOfMonth?.first ?? 5),
                 value: Binding(
@@ -667,7 +781,7 @@ private struct YearlyRecurrenceEditor: View {
                 ),
                 in: 1...31
             )
+            .font(.system(size: 11))
         }
-        .font(.caption)
     }
 }
