@@ -577,13 +577,13 @@ private struct MonthlyRecurrenceEditor: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
 
-            Picker("", selection: Binding(get: { mode }, set: { switchMode($0) }))
-            .pickerStyle(MenuPickerStyle())
-            .frame(width: 130) {
+            Picker("", selection: Binding(get: { mode }, set: { switchMode($0) })) {
                 Text(L10n.ParsedList.monthlyPlain).tag(0)
                 Text(L10n.ParsedList.monthlyByDate).tag(1)
                 Text(L10n.ParsedList.monthlyByNthWeekday).tag(2)
             }
+            .pickerStyle(MenuPickerStyle())
+            .frame(width: 130)
 
             switch mode {
             case 1:
