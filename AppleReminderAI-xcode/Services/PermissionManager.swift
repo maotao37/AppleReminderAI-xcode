@@ -139,21 +139,21 @@ class PermissionManager: ObservableObject {
     /// 获取权限状态的描述文本
     func statusDescription(for status: EKAuthorizationStatus) -> String {
         if #available(macOS 14.0, *) {
-            if status == .fullAccess { return "完全访问" }
-            if status == .writeOnly { return "仅写入" }
+            if status == .fullAccess { return L10n.Permission.fullAccess }
+            if status == .writeOnly { return L10n.Permission.writeOnly }
         }
         
         switch status {
         case .notDetermined:
-            return "未确定"
+            return L10n.Permission.notDetermined
         case .restricted:
-            return "受限制"
+            return L10n.Permission.restricted
         case .denied:
-            return "已拒绝"
+            return L10n.Permission.denied
         case .authorized:
-            return "已授权"
+            return L10n.Permission.authorized
         default:
-            return "未知"
+            return L10n.Permission.unknown
         }
     }
     

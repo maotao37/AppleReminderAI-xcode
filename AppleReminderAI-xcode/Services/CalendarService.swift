@@ -22,17 +22,17 @@ enum CalendarServiceError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noAccess:
-            return "没有日历访问权限"
+            return L10n.CalendarError.noAccess
         case .saveFailed(let message):
-            return "保存失败: \(message)"
+            return L10n.CalendarError.saveFailed(message)
         case .calendarNotFound:
-            return "找不到指定的日历"
+            return L10n.CalendarError.calendarNotFound
         case .eventNotFound:
-            return "找不到指定的事件"
+            return L10n.CalendarError.eventNotFound
         case .missingDate:
-            return "日历事件必须设置开始日期"
+            return L10n.CalendarError.missingDate
         case .duplicate:
-            return "目标日历中已存在标题和时间相同的事件"
+            return L10n.CalendarError.duplicate
         }
     }
 }

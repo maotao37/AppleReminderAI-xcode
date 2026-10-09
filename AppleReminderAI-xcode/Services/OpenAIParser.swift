@@ -21,8 +21,8 @@ class OpenAIParser: ItemParser {
     
     // MARK: - ItemParser 协议属性
     
-    var name: String { "AI 解析器" }
-    var description: String { "使用 OpenAI API 进行智能解析，支持更复杂的自然语言表达" }
+    var name: String { L10n.Parser.aiName }
+    var description: String { L10n.Parser.aiDescription }
     var requiresNetwork: Bool { true }
     
     // MARK: - 私有属性
@@ -34,56 +34,100 @@ class OpenAIParser: ItemParser {
     /// API 请求超时时间
     private let timeoutInterval: TimeInterval = 30
 
+    /// 429 / 瞬时网络错误的自动重试次数
+    private let maxRetryCount = 2
+
+    /// 重试退避基础间隔（1s、2s 递增）
+    private let retryBackoffSeconds: UInt64 = 1
+
     init(reminderGroupNames: [String] = [], calendarGroupNames: [String] = []) {
         self.reminderGroupNames = reminderGroupNames
         self.calendarGroupNames = calendarGroupNames
     }
-    
+
     // MARK: - 解析方法
-    
+
     func parse(_ input: String) async throws -> [ParsedItem] {
         // 检查输入是否为空
         let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedInput.isEmpty else {
             throw ParserError.emptyInput
         }
-        
+
         // 检查 API Key 是否配置
         guard !settings.openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ParserError.invalidAPIKey
         }
 
         guard settings.validatedOpenAIBaseURL != nil else {
-            throw ParserError.parseFailure("API URL 必须使用 HTTPS；本机服务可使用 localhost HTTP")
+            throw ParserError.parseFailure(L10n.Errors.httpsRequired)
         }
-        
+
         // 构建请求
         let request = try buildRequest(for: trimmedInput)
-        
-        // 发送请求
+
+        // 发送请求（429/瞬时网络错误自动重试；任务取消立即中断）
+        var attempt = 0
+        while true {
+            do {
+                return try await sendOnce(request, originalText: trimmedInput)
+            } catch let error as ParserError where Self.isRetryable(error) {
+                guard attempt < maxRetryCount else { throw error }
+                attempt += 1
+                // Task.sleep 在任务被取消时抛出 CancellationError，直接终止重试
+                try await Task.sleep(nanoseconds: UInt64(attempt) * retryBackoffSeconds * 1_000_000_000)
+            }
+        }
+    }
+
+    /// 发送单次请求并解析响应
+    private func sendOnce(_ request: URLRequest, originalText: String) async throws -> [ParsedItem] {
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch let error as URLError {
+            // URLSession 异步请求支持协作式取消：外层 Task 取消时映射为 CancellationError
+            if error.code == .cancelled {
+                throw CancellationError()
+            }
             throw ParserError.networkError(error)
         }
-        
+
         // 检查响应状态
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw ParserError.parseFailure("无效的响应")
+            throw ParserError.parseFailure(L10n.Errors.invalidResponse)
         }
-        
+
         switch httpResponse.statusCode {
         case 200:
-            return try parseResponse(data, originalText: trimmedInput)
+            return try parseResponse(data, originalText: originalText)
         case 401:
             throw ParserError.invalidAPIKey
         case 429:
             throw ParserError.rateLimitExceeded
         default:
-            let errorMessage = String(data: data, encoding: .utf8) ?? "未知错误"
-            throw ParserError.parseFailure("API 错误 (\(httpResponse.statusCode)): \(errorMessage)")
+            let errorMessage = String(data: data, encoding: .utf8) ?? L10n.Errors.unknown("")
+            throw ParserError.parseFailure(L10n.Errors.apiError(httpResponse.statusCode, errorMessage))
+        }
+    }
+
+    /// 429 与瞬时网络错误可自动重试；401、响应格式错误等不可重试
+    private static func isRetryable(_ error: ParserError) -> Bool {
+        switch error {
+        case .rateLimitExceeded:
+            return true
+        case .networkError(let underlying):
+            guard let urlError = underlying as? URLError else { return false }
+            switch urlError.code {
+            case .timedOut, .networkConnectionLost, .cannotConnectToHost,
+                 .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet:
+                return true
+            default:
+                return false
+            }
+        default:
+            return false
         }
     }
     
@@ -92,7 +136,7 @@ class OpenAIParser: ItemParser {
     /// 构建 API 请求
     private func buildRequest(for input: String) throws -> URLRequest {
         guard let baseURL = settings.validatedOpenAIBaseURL else {
-            throw ParserError.parseFailure("API URL 必须使用 HTTPS；本机服务可使用 localhost HTTP")
+            throw ParserError.parseFailure(L10n.Errors.httpsRequired)
         }
 
         let url = baseURL
@@ -152,6 +196,9 @@ class OpenAIParser: ItemParser {
                     "recurrence": "none",
                     "recurrenceInterval": 1,
                     "recurrenceWeekdays": [],
+                    "recurrenceDaysOfMonth": null,
+                    "recurrenceMonthsOfYear": null,
+                    "recurrenceSetPosition": null,
                     "recurrenceEndDate": null,
                     "recurrenceCount": null,
                     "alertEnabled": true,
@@ -176,7 +223,7 @@ class OpenAIParser: ItemParser {
         8. “今天”指本地当天；如果用户明确说“今天”，即使具体时间已经过去也必须保留今天。只给钟点而没有日期时，使用最近的未来时刻：尚未到则今天，已经过则明天
         9. 日历事件只有在用户明确给出结束时间或时长时才填写 endDate；未给出时返回 null，由客户端补默认时长。提醒事项的 endDate 永远为 null
         10. dueDate 和 endDate 必须处于用户时区。dateTime 示例：2026-01-20T15:00:00+08:00；不得返回缺失日期的单独时间
-        11. 重复规则：recurrence 只能是 none/daily/weekdays/weekly/biweekly/monthly/yearly；recurrenceInterval 至少为 1；recurrenceWeekdays 使用 ISO 星期数字 1=周一到 7=周日；没有的信息用空数组或 null
+        11. 重复规则：recurrence 只能是 none/daily/weekdays/weekly/biweekly/monthly/yearly；recurrenceInterval 至少为 1；recurrenceWeekdays 使用 ISO 星期数字 1=周一到 7=周日；没有的信息用空数组或 null。"每月15号" 用 recurrence="monthly" + recurrenceDaysOfMonth=[15]；"每年3月5日" 用 recurrence="yearly" + recurrenceMonthsOfYear=[3] + recurrenceDaysOfMonth=[5]；"每月最后一个周五" 用 recurrence="monthly" + recurrenceWeekdays=[5] + recurrenceSetPosition=-1（第 1-4 个分别用 1-4，最后用 -1）
         12. 每周五等重复事项的 dueDate 为从当前时间开始的下一次匹配日期；没有具体钟点时仍为 date/全天。“工作日”使用 recurrence="weekdays" 和 [1,2,3,4,5]
         13. 提醒策略：alertEnabled=false 表示明确不提醒；alertOffsetMinutes 是相对开始/截止时间的分钟数，提前为负数。未明确说明时，提醒事项默认 0，日历默认 -15；全天事项默认 alertEnabled=false
         14. 自动分组：targetGroupName 只能逐字返回上方对应类型的现有列表或日历名称；根据工作、家庭、购物、学习、健康、财务、旅行等语义选择。没有可靠匹配时必须为 null，不得创造新名称
@@ -217,18 +264,18 @@ class OpenAIParser: ItemParser {
               let firstChoice = choices.first,
               let message = firstChoice["message"] as? [String: Any],
               let content = message["content"] as? String else {
-            throw ParserError.parseFailure("无法解析 API 响应")
+            throw ParserError.parseFailure(L10n.Errors.cannotParseResponse)
         }
         
         // 解析内容中的 JSON
         guard let contentData = content.data(using: .utf8),
               let parsed = try JSONSerialization.jsonObject(with: contentData) as? [String: Any] else {
-            throw ParserError.parseFailure("无法解析返回的 JSON 内容")
+            throw ParserError.parseFailure(L10n.Errors.cannotParseJSON)
         }
         
         // 提取事项数组
         guard let items = parsed["items"] as? [[String: Any]] else {
-            throw ParserError.parseFailure("响应格式错误：缺少 items 数组")
+            throw ParserError.parseFailure(L10n.Errors.missingItems)
         }
         
         var results: [ParsedItem] = []
@@ -277,6 +324,9 @@ class OpenAIParser: ItemParser {
 
         let recurrenceInterval = itemData["recurrenceInterval"] as? Int
         let recurrenceWeekdays = (itemData["recurrenceWeekdays"] as? [Any])?.compactMap { $0 as? Int }
+        let recurrenceDaysOfMonth = (itemData["recurrenceDaysOfMonth"] as? [Any])?.compactMap { $0 as? Int }
+        let recurrenceMonthsOfYear = (itemData["recurrenceMonthsOfYear"] as? [Any])?.compactMap { $0 as? Int }
+        let recurrenceSetPosition = itemData["recurrenceSetPosition"] as? Int
         let recurrenceEndDate = parseISODate(itemData["recurrenceEndDate"] as? String)
         let recurrenceCount = itemData["recurrenceCount"] as? Int
         let alertEnabled = itemData["alertEnabled"] as? Bool
@@ -298,6 +348,9 @@ class OpenAIParser: ItemParser {
             recurrenceWeekdays: recurrenceWeekdays,
             recurrenceEndDate: recurrenceEndDate,
             recurrenceCount: recurrenceCount,
+            recurrenceDaysOfMonth: recurrenceDaysOfMonth,
+            recurrenceMonthsOfYear: recurrenceMonthsOfYear,
+            recurrenceSetPosition: recurrenceSetPosition,
             alertEnabled: alertEnabled,
             alertOffsetMinutes: alertOffsetMinutes,
             targetGroupName: targetGroupName,
@@ -450,7 +503,7 @@ class OpenAIParser: ItemParser {
     private func jsonString(for values: [String]) throws -> String {
         let data = try JSONSerialization.data(withJSONObject: values)
         guard let string = String(data: data, encoding: .utf8) else {
-            throw ParserError.parseFailure("无法编码分组列表")
+            throw ParserError.parseFailure(L10n.Errors.cannotEncodeGroups)
         }
         return string
     }

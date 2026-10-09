@@ -38,16 +38,34 @@ enum EventKitRecurrenceBuilder {
             recurrenceEnd = nil
         }
 
+        // "每月15号" / "每年3月5日" 需要月内日期；年份细节还需要月份
+        let supportsMonthDayDetails = item.recurrence == .monthly || item.recurrence == .yearly
+        let daysOfMonth: [NSNumber]? = supportsMonthDayDetails
+            ? item.recurrenceDaysOfMonth?.compactMap { (1...31).contains($0) ? NSNumber(value: $0) : nil }
+            : nil
+        let monthsOfYear: [NSNumber]? = item.recurrence == .yearly
+            ? item.recurrenceMonthsOfYear?.compactMap { (1...12).contains($0) ? NSNumber(value: $0) : nil }
+            : nil
+
+        // "每月最后一个周五" 需要月内第 N 个星期几（setPositions 配合 daysOfTheWeek 使用）
+        var setPositions: [NSNumber]?
+        if item.recurrence == .monthly,
+           let position = item.recurrenceSetPosition,
+           position == -1 || (1...4).contains(position),
+           let weekdayList = weekdays, !weekdayList.isEmpty {
+            setPositions = [NSNumber(value: position)]
+        }
+
         let daysOfWeek = weekdays?.compactMap(dayOfWeek)
         return EKRecurrenceRule(
             recurrenceWith: frequency,
             interval: interval,
             daysOfTheWeek: daysOfWeek?.isEmpty == false ? daysOfWeek : nil,
-            daysOfTheMonth: nil,
-            monthsOfTheYear: nil,
+            daysOfTheMonth: daysOfMonth?.isEmpty == false ? daysOfMonth : nil,
+            monthsOfTheYear: monthsOfYear?.isEmpty == false ? monthsOfYear : nil,
             weeksOfTheYear: nil,
             daysOfTheYear: nil,
-            setPositions: nil,
+            setPositions: setPositions,
             end: recurrenceEnd
         )
     }

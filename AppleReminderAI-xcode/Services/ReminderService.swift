@@ -21,15 +21,15 @@ enum ReminderServiceError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noAccess:
-            return "没有提醒事项访问权限"
+            return L10n.ReminderError.noAccess
         case .saveFailed(let message):
-            return "保存失败: \(message)"
+            return L10n.ReminderError.saveFailed(message)
         case .listNotFound:
-            return "找不到指定的提醒事项列表"
+            return L10n.ReminderError.listNotFound
         case .reminderNotFound:
-            return "找不到指定的提醒事项"
+            return L10n.ReminderError.notFound
         case .duplicate:
-            return "目标列表中已存在标题和时间相同的提醒事项"
+            return L10n.ReminderError.duplicate
         }
     }
 }
@@ -46,6 +46,20 @@ class ReminderService {
     
     private let permissionManager = PermissionManager.shared
     private var eventStore: EKEventStore { permissionManager.eventStore }
+
+    // MARK: - 查重缓存
+
+    /// 列表内未完成提醒的查重索引（避免每次创建都全量拉取大列表）
+    private struct DuplicateIndex {
+        let fetchedAt: Date
+        /// (归一化标题, 截止日期)
+        let entries: [(title: String, dueDate: Date?)]
+    }
+
+    private var duplicateIndexCache: [String: DuplicateIndex] = [:]
+
+    /// 查重缓存有效期；创建/删除成功后立即失效
+    private let duplicateCacheTTL: TimeInterval = 5
     
     // MARK: - 初始化
     
@@ -140,6 +154,7 @@ class ReminderService {
         // 保存提醒事项
         do {
             try eventStore.save(reminder, commit: true)
+            invalidateDuplicateIndex(for: reminderList.calendarIdentifier)
             return reminder
         } catch {
             throw ReminderServiceError.saveFailed(error.localizedDescription)
@@ -153,18 +168,19 @@ class ReminderService {
         }
         do {
             try eventStore.remove(reminder, commit: true)
+            invalidateDuplicateIndex(for: reminder.calendar?.calendarIdentifier)
         } catch {
             throw ReminderServiceError.saveFailed(error.localizedDescription)
         }
     }
 
     private func hasDuplicate(_ item: ParsedItem, in list: EKCalendar) async -> Bool {
-        let reminders = await fetchIncompleteReminders(in: [list])
-        return reminders.contains { reminder in
-            let sameTitle = reminder.title.compare(item.title, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
-            guard sameTitle else { return false }
+        let entries = await duplicateIndex(for: list).entries
+        let normalizedTitle = item.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        return entries.contains { entry in
+            guard entry.title == normalizedTitle else { return false }
 
-            switch (item.dueDate, reminder.dueDateComponents?.date) {
+            switch (item.dueDate, entry.dueDate) {
             case (nil, nil):
                 return true
             case let (expected?, actual?):
@@ -176,6 +192,31 @@ class ReminderService {
                 return false
             }
         }
+    }
+
+    /// 获取（或按 TTL 刷新）列表的查重索引
+    private func duplicateIndex(for list: EKCalendar) async -> DuplicateIndex {
+        let listID = list.calendarIdentifier
+        if let cached = duplicateIndexCache[listID],
+           Date().timeIntervalSince(cached.fetchedAt) < duplicateCacheTTL {
+            return cached
+        }
+
+        let reminders = await fetchIncompleteReminders(in: [list])
+        let index = DuplicateIndex(
+            fetchedAt: Date(),
+            entries: reminders.map { reminder in
+                let title = (reminder.title ?? "").folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                return (title, reminder.dueDateComponents?.date)
+            }
+        )
+        duplicateIndexCache[listID] = index
+        return index
+    }
+
+    private func invalidateDuplicateIndex(for listID: String?) {
+        guard let listID else { return }
+        duplicateIndexCache.removeValue(forKey: listID)
     }
     
     // MARK: - 提醒事项查询

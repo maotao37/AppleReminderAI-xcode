@@ -30,6 +30,9 @@ struct ParsedItemsListView: View {
     
     /// 是否正在创建
     var isCreating: Bool
+
+    /// 批量创建进度（第 N 个 / 共 M 个）
+    var creationProgress: (current: Int, total: Int)? = nil
     
     /// 可用的提醒事项列表
     var reminderLists: [EKCalendar]
@@ -50,7 +53,7 @@ struct ParsedItemsListView: View {
         VStack(spacing: 16) {
             // 顶部标题和批量操作
             HStack {
-                Label("解析结果（\(items.count) 项）", systemImage: "list.bullet.rectangle")
+                Label(L10n.Main.parseResultCount(items.count), systemImage: "list.bullet.rectangle")
                     .font(.headline)
                     .foregroundColor(.secondary)
                 
@@ -66,10 +69,15 @@ struct ParsedItemsListView: View {
                                 ProgressView()
                                     .controlSize(.small)
                                     .scaleEffect(0.7)
+                                if let progress = creationProgress {
+                                    Text(L10n.ParsedList.creatingProgress(progress.current, progress.total))
+                                } else {
+                                    Text(L10n.ParsedList.createAll)
+                                }
                             } else {
                                 Image(systemName: "checkmark.circle.fill")
+                                Text(L10n.ParsedList.createAll)
                             }
-                            Text("全部创建")
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -156,7 +164,7 @@ struct ParsedItemCardView: View {
                         }
                         
                         if item.recurrence != .none {
-                            Label(item.recurrence.rawValue, systemImage: item.recurrence.icon)
+                            Label(item.recurrenceSummary, systemImage: item.recurrence.icon)
                                 .font(.caption2)
                                 .foregroundColor(.purple)
                         }
@@ -168,7 +176,7 @@ struct ParsedItemCardView: View {
                         }
 
                         if item.confidence < 0.7 {
-                            Label("请确认", systemImage: "exclamationmark.triangle.fill")
+                            Label(L10n.ParsedList.lowConfidence, systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption2)
                                 .foregroundColor(.orange)
                         }
@@ -187,7 +195,7 @@ struct ParsedItemCardView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .help("移除此事项")
+                    .help(L10n.Common.remove)
                     
                     // 展开/收起按钮
                     Button {
@@ -197,7 +205,7 @@ struct ParsedItemCardView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .help(isExpanded ? "收起详情" : "展开编辑")
+                    .help(isExpanded ? L10n.Common.collapseEdit : L10n.Common.expandEdit)
                     
                     // 快速创建按钮
                     Button {
@@ -214,7 +222,7 @@ struct ParsedItemCardView: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                     .disabled(isCreating)
-                    .help("创建此事项")
+                    .help(L10n.Common.createThisItem)
                 }
             }
             .padding(12)
@@ -231,7 +239,7 @@ struct ParsedItemCardView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     // 类型切换
                     HStack {
-                        Text("类型")
+                        Text(L10n.ParsedList.type)
                             .font(.caption)
                             .foregroundColor(.secondary)
                         
@@ -258,10 +266,10 @@ struct ParsedItemCardView: View {
                     
                     // 标题编辑
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("标题")
+                        Text(L10n.ParsedList.titleField)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        TextField("输入标题", text: $item.title)
+                        TextField(L10n.ParsedList.titlePlaceholder, text: $item.title)
                             .textFieldStyle(PlainTextFieldStyle())
                             .padding(8)
                             .background(Color.secondary.opacity(0.1))
@@ -271,7 +279,7 @@ struct ParsedItemCardView: View {
                     // 时间选择
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 16)], alignment: .leading, spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(item.type == .calendar ? "开始时间" : "提醒时间")
+                            Text(item.type == .calendar ? L10n.ParsedList.startTime : L10n.ParsedList.reminderTime)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             
@@ -288,7 +296,7 @@ struct ParsedItemCardView: View {
                         
                         if item.type == .calendar {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("结束时间")
+                                Text(L10n.ParsedList.endTime)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                 
@@ -306,7 +314,7 @@ struct ParsedItemCardView: View {
                         
                         // 全天切换
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("全天")
+                            Text(L10n.ParsedList.allDay)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Toggle("", isOn: Binding(
@@ -321,7 +329,7 @@ struct ParsedItemCardView: View {
                     // 重复、提醒和优先级
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 16)], alignment: .leading, spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("重复周期")
+                            Text(L10n.ParsedList.recurrence)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Picker("", selection: $item.recurrence) {
@@ -334,7 +342,7 @@ struct ParsedItemCardView: View {
 
                         if item.recurrence != .none && item.recurrence != .weekdays && item.recurrence != .biweekly {
                             Stepper(
-                                "间隔 \(item.recurrenceInterval ?? 1)",
+                                L10n.ParsedList.interval(item.recurrenceInterval ?? 1),
                                 value: Binding(
                                     get: { item.recurrenceInterval ?? 1 },
                                     set: { item.recurrenceInterval = $0 }
@@ -346,7 +354,7 @@ struct ParsedItemCardView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("提醒")
+                            Text(L10n.ParsedList.alert)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Toggle("", isOn: Binding(
@@ -366,18 +374,18 @@ struct ParsedItemCardView: View {
                                 get: { item.alertOffsetMinutes ?? ScheduleNormalizer.defaultAlertOffset(for: item) },
                                 set: { item.alertOffsetMinutes = $0 }
                             )) {
-                                Text("准时").tag(0)
-                                Text("提前 5 分钟").tag(-5)
-                                Text("提前 15 分钟").tag(-15)
-                                Text("提前 30 分钟").tag(-30)
-                                Text("提前 1 小时").tag(-60)
-                                Text("提前 1 天").tag(-1440)
+                                Text(L10n.ParsedList.alertOnTime).tag(0)
+                                Text(L10n.ParsedList.minutesEarly(5)).tag(-5)
+                                Text(L10n.ParsedList.minutesEarly(15)).tag(-15)
+                                Text(L10n.ParsedList.minutesEarly(30)).tag(-30)
+                                Text(L10n.ParsedList.alertEarly1Hour).tag(-60)
+                                Text(L10n.ParsedList.alertEarly1Day).tag(-1440)
                             }
                             .frame(width: 120)
                         }
                         
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("优先级")
+                            Text(L10n.ParsedList.priority)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Picker("", selection: Binding(
@@ -399,15 +407,25 @@ struct ParsedItemCardView: View {
                         ))
                     }
 
+                    // "每月15号" / "每月最后一个周五" 细节编辑
+                    if item.recurrence == .monthly {
+                        MonthlyRecurrenceEditor(item: $item)
+                    }
+
+                    // "每年3月5日" 细节编辑
+                    if item.recurrence == .yearly {
+                        YearlyRecurrenceEditor(item: $item)
+                    }
+
                     if item.recurrence != .none {
-                        Toggle("设置重复截止日期", isOn: Binding(
+                        Toggle(L10n.ParsedList.recurrenceEndToggle, isOn: Binding(
                             get: { item.recurrenceEndDate != nil },
                             set: { item.recurrenceEndDate = $0 ? (item.dueDate ?? Date()) : nil }
                         ))
                         .font(.caption)
 
                         if let recurrenceEndDate = item.recurrenceEndDate {
-                            DatePicker("截止", selection: Binding(
+                            DatePicker(L10n.ParsedList.recurrenceEnd, selection: Binding(
                                 get: { recurrenceEndDate },
                                 set: { item.recurrenceEndDate = $0 }
                             ), displayedComponents: .date)
@@ -417,12 +435,12 @@ struct ParsedItemCardView: View {
                     
                     // 目标列表选择
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(item.type == .reminder ? "保存至提醒事项列表" : "保存至日历")
+                        Text(item.type == .reminder ? L10n.ParsedList.saveToReminderList : L10n.ParsedList.saveToCalendar)
                             .font(.caption)
                             .foregroundColor(.secondary)
                         
                         if availableGroups.isEmpty {
-                            Label("创建时请求权限并使用系统默认分组", systemImage: "lock")
+                            Label(L10n.ParsedList.permissionPendingGroup, systemImage: "lock")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         } else {
@@ -435,10 +453,10 @@ struct ParsedItemCardView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("备注")
+                        Text(L10n.ParsedList.notes)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        TextField("可选", text: Binding(
+                        TextField(L10n.Common.optional, text: Binding(
                             get: { item.notes ?? "" },
                             set: { item.notes = $0.isEmpty ? nil : $0 }
                         ))
@@ -446,7 +464,7 @@ struct ParsedItemCardView: View {
                     }
 
                     if item.type == .calendar && item.dueDate == nil {
-                        Label("日历事件需要设置开始日期", systemImage: "exclamationmark.triangle.fill")
+                        Label(L10n.ParsedList.calendarNeedsDate, systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
                             .foregroundColor(.orange)
                     }
@@ -461,7 +479,7 @@ struct ParsedItemCardView: View {
                             } else {
                                 Image(systemName: "plus.circle.fill")
                             }
-                            Text("确认创建并同步到苹果\(item.type.rawValue)")
+                            Text(L10n.ParsedList.confirmCreate(typeName: item.type.rawValue))
                                 .fontWeight(.semibold)
                         }
                         .frame(maxWidth: .infinity)
@@ -507,11 +525,11 @@ struct ParsedItemCardView: View {
 
 private struct WeekdaySelectionView: View {
     @Binding var selection: [Int]
-    private let labels = ["一", "二", "三", "四", "五", "六", "日"]
+    private let labels = L10n.RecurrenceDisplay.weekdayShort
 
     var body: some View {
         HStack(spacing: 6) {
-            Text("重复于")
+            Text(L10n.ParsedList.repeatOn)
                 .font(.caption)
                 .foregroundColor(.secondary)
             ForEach(1...7, id: \.self) { day in
@@ -533,5 +551,126 @@ private struct WeekdaySelectionView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+}
+
+/// 每月重复的细节编辑：按日期（每月15号）或按第 N 个星期几（每月最后一个周五）
+private struct MonthlyRecurrenceEditor: View {
+    @Binding var item: ParsedItem
+    private let weekdayLabels = L10n.RecurrenceDisplay.weekdays
+
+    /// 0=仅每月，1=按月内日期，2=按第 N 个星期几
+    private var mode: Int {
+        if item.recurrenceSetPosition != nil,
+           let weekdays = item.recurrenceWeekdays, !weekdays.isEmpty {
+            return 2
+        }
+        if let days = item.recurrenceDaysOfMonth, !days.isEmpty {
+            return 1
+        }
+        return 0
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(L10n.ParsedList.monthlyRule)
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            Picker("", selection: Binding(get: { mode }, set: { switchMode($0) }))
+            .pickerStyle(MenuPickerStyle())
+            .frame(width: 130) {
+                Text(L10n.ParsedList.monthlyPlain).tag(0)
+                Text(L10n.ParsedList.monthlyByDate).tag(1)
+                Text(L10n.ParsedList.monthlyByNthWeekday).tag(2)
+            }
+
+            switch mode {
+            case 1:
+                Stepper(
+                    L10n.ParsedList.monthlyByDateNth(item.recurrenceDaysOfMonth?.first ?? 15),
+                    value: Binding(
+                        get: { item.recurrenceDaysOfMonth?.first ?? 15 },
+                        set: { item.recurrenceDaysOfMonth = [$0] }
+                    ),
+                    in: 1...31
+                )
+                .font(.caption)
+
+            case 2:
+                Picker("", selection: Binding(
+                    get: { item.recurrenceSetPosition ?? -1 },
+                    set: { item.recurrenceSetPosition = $0 }
+                )) {
+                    Text(L10n.ParsedList.nthFirst).tag(1)
+                    Text(L10n.ParsedList.nthSecond).tag(2)
+                    Text(L10n.ParsedList.nthThird).tag(3)
+                    Text(L10n.ParsedList.nthFourth).tag(4)
+                    Text(L10n.ParsedList.nthLast).tag(-1)
+                }
+                .frame(width: 90)
+
+                Picker("", selection: Binding(
+                    get: { item.recurrenceWeekdays?.first ?? 5 },
+                    set: { item.recurrenceWeekdays = [$0] }
+                )) {
+                    ForEach(1...7, id: \.self) { weekday in
+                        Text(weekdayLabels[weekday - 1]).tag(weekday)
+                    }
+                }
+                .frame(width: 90)
+
+            default:
+                EmptyView()
+            }
+        }
+        .font(.caption)
+    }
+
+    private func switchMode(_ newMode: Int) {
+        switch newMode {
+        case 1:
+            item.recurrenceDaysOfMonth = [item.recurrenceDaysOfMonth?.first ?? 15]
+            item.recurrenceSetPosition = nil
+            item.recurrenceWeekdays = nil
+        case 2:
+            item.recurrenceSetPosition = item.recurrenceSetPosition ?? -1
+            item.recurrenceWeekdays = [item.recurrenceWeekdays?.first ?? 5]
+            item.recurrenceDaysOfMonth = nil
+        default:
+            item.recurrenceDaysOfMonth = nil
+            item.recurrenceSetPosition = nil
+            item.recurrenceWeekdays = nil
+        }
+    }
+}
+
+/// 每年重复的细节编辑：每年几月几日
+private struct YearlyRecurrenceEditor: View {
+    @Binding var item: ParsedItem
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Text(L10n.ParsedList.yearlyOn)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Stepper(
+                L10n.ParsedList.monthNumber(item.recurrenceMonthsOfYear?.first ?? 3),
+                value: Binding(
+                    get: { item.recurrenceMonthsOfYear?.first ?? 3 },
+                    set: { item.recurrenceMonthsOfYear = [$0] }
+                ),
+                in: 1...12
+            )
+            Stepper(
+                L10n.ParsedList.dayNumber(item.recurrenceDaysOfMonth?.first ?? 5),
+                value: Binding(
+                    get: { item.recurrenceDaysOfMonth?.first ?? 5 },
+                    set: { item.recurrenceDaysOfMonth = [$0] }
+                ),
+                in: 1...31
+            )
+        }
+        .font(.caption)
     }
 }

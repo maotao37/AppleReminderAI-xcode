@@ -20,17 +20,17 @@ enum ParserError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .emptyInput:
-            return "请输入要解析的内容"
+            return L10n.Errors.emptyInput
         case .parseFailure(let message):
-            return "解析失败: \(message)"
+            return L10n.Errors.parseFailure(message)
         case .networkError(let error):
-            return "网络错误: \(error.localizedDescription)"
+            return L10n.Errors.network(error.localizedDescription)
         case .invalidAPIKey:
-            return "API Key 无效，请检查设置"
+            return L10n.Errors.invalidAPIKey
         case .rateLimitExceeded:
-            return "请求过于频繁，请稍后再试"
+            return L10n.Errors.rateLimitExceeded
         case .unknownError(let error):
-            return "未知错误: \(error.localizedDescription)"
+            return L10n.Errors.unknown(error.localizedDescription)
         }
     }
 }

@@ -30,6 +30,12 @@ class MainViewModel: ObservableObject {
     
     /// 是否正在创建
     @Published var isCreating: Bool = false
+
+    /// 批量创建进度（第 N 个 / 共 M 个），仅批量创建期间非 nil
+    @Published var creationProgress: (current: Int, total: Int)?
+
+    /// 历史记录加载失败提示（数据损坏时告知用户，不再静默丢弃）
+    @Published var historyLoadWarning: String?
     
     /// 错误信息
     @Published var errorMessage: String?
@@ -67,9 +73,9 @@ class MainViewModel: ObservableObject {
     
     /// 历史记录存储键
     private let historyKey = "createdItemHistory"
-    
-    /// 最大历史记录数量
-    private let maxHistoryCount = 50
+
+    /// 当前进行中的解析任务（AI 模式手动触发，支持取消）
+    private var activeParseTask: Task<Void, Never>?
 
     /// Prevents an older parser request from overwriting newer input.
     private var parseGeneration = 0
@@ -81,10 +87,11 @@ class MainViewModel: ObservableObject {
         loadAvailableLists()
         setupNotifications()
         setupParserModeObserver()
+        setupHistoryLimitObserver()
     }
     
     private func setupNotifications() {
-        NotificationCenter.default.addObserver(forName: NSNotification.Name("OpenSettings"), object: nil, queue: .main) { [weak self] _ in
+        NotificationCenter.default.addObserver(forName: .openSettingsRequest, object: nil, queue: .main) { [weak self] _ in
             // 延迟执行以避免在视图更新期间修改状态
             DispatchQueue.main.async {
                 self?.showSettings = true
@@ -117,8 +124,35 @@ class MainViewModel: ObservableObject {
             .store(in: &cancellables)
     }
     
+    /// 设置历史记录上限变化监听：缩小上限时立即裁剪已存记录
+    private func setupHistoryLimitObserver() {
+        settings.$historyLimit
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] limit in
+                guard let self = self, self.history.count > limit else { return }
+                self.history = Array(self.history.prefix(limit))
+                self.saveHistory()
+            }
+            .store(in: &cancellables)
+    }
+
     // MARK: - 解析方法
-    
+
+    /// 手动触发解析（AI 解析按钮 / ⌘↵ 调用），任务可被 cancelParsing() 取消
+    func startParsing() {
+        activeParseTask?.cancel()
+        activeParseTask = Task { await parseInput() }
+    }
+
+    /// 取消进行中的 AI 解析（网络慢时不必干等超时）
+    func cancelParsing() {
+        activeParseTask?.cancel()
+        activeParseTask = nil
+        parseGeneration += 1
+        isParsing = false
+    }
+
     /// 解析输入文本
     func parseInput() async {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -149,15 +183,19 @@ class MainViewModel: ObservableObject {
             parsedItems = results.map(assignGroup)
             
             if results.isEmpty {
-                errorMessage = "无法解析输入内容，请尝试更具体的描述"
+                errorMessage = L10n.Message.unparseable
             }
+        } catch is CancellationError {
+            // 用户主动取消：不算错误，保留当前内容
+            guard generation == parseGeneration else { return }
+            errorMessage = nil
         } catch let error as ParserError {
             guard generation == parseGeneration else { return }
             errorMessage = error.localizedDescription
             parsedItems = []
         } catch {
             guard generation == parseGeneration else { return }
-            errorMessage = "解析失败: \(error.localizedDescription)"
+            errorMessage = L10n.Message.parseFailed(error.localizedDescription)
             parsedItems = []
         }
 
@@ -213,20 +251,20 @@ class MainViewModel: ObservableObject {
         
         do {
             let identifier = try await create(item)
-            successMessage = item.type == .reminder ? "提醒事项已创建" : "日历事件已创建"
-            addToHistory(item: assignGroup(item), success: true, calendarItemIdentifier: identifier)
-            
+            successMessage = item.type == .reminder ? L10n.Message.reminderCreated : L10n.Message.eventCreated
+            addToHistory(item: item, success: true, calendarItemIdentifier: identifier)
+
             // 从列表中移除已创建的事项
             parsedItems.remove(at: index)
-            
+
             // 如果所有事项都已创建，清空输入
             if parsedItems.isEmpty {
                 inputText = ""
             }
-            
+
         } catch {
             errorMessage = error.localizedDescription
-            addToHistory(item: assignGroup(item), success: false, error: error.localizedDescription)
+            addToHistory(item: item, success: false, error: error.localizedDescription)
         }
         
         isCreating = false
@@ -246,16 +284,18 @@ class MainViewModel: ObservableObject {
         
         // 创建副本以便遍历时修改原数组
         let itemsToCreate = parsedItems
-        
-        for source in itemsToCreate {
+        creationProgress = (0, itemsToCreate.count)
+
+        for (index, source) in itemsToCreate.enumerated() {
+            creationProgress = (index + 1, itemsToCreate.count)
             let item = assignGroup(ScheduleNormalizer.normalize(source))
             do {
                 let identifier = try await create(item)
-                addToHistory(item: assignGroup(item), success: true, calendarItemIdentifier: identifier)
+                addToHistory(item: item, success: true, calendarItemIdentifier: identifier)
                 successCount += 1
             } catch {
-                addToHistory(item: assignGroup(item), success: false, error: error.localizedDescription)
-                failedItems.append(assignGroup(item))
+                addToHistory(item: item, success: false, error: error.localizedDescription)
+                failedItems.append(item)
                 failCount += 1
             }
         }
@@ -264,14 +304,15 @@ class MainViewModel: ObservableObject {
         if failedItems.isEmpty {
             inputText = ""
         }
-        
+
         // 设置结果消息
         if failCount == 0 {
-            successMessage = "成功创建 \(successCount) 个事项"
+            successMessage = L10n.Message.created(successCount)
         } else {
-            errorMessage = "创建完成：成功 \(successCount) 个，失败 \(failCount) 个；失败项已保留，可直接重试"
+            errorMessage = L10n.Message.createPartialResult(success: successCount, failure: failCount)
         }
-        
+
+        creationProgress = nil
         isCreating = false
     }
 
@@ -358,12 +399,13 @@ class MainViewModel: ObservableObject {
             calendarItemIdentifier: calendarItemIdentifier
         )
         history.insert(record, at: 0)
-        
-        // 限制历史记录数量
-        if history.count > maxHistoryCount {
-            history = Array(history.prefix(maxHistoryCount))
+
+        // 限制历史记录数量（用户可在设置中调整上限）
+        let limit = settings.historyLimit
+        if history.count > limit {
+            history = Array(history.prefix(limit))
         }
-        
+
         saveHistory()
     }
     
@@ -380,7 +422,7 @@ class MainViewModel: ObservableObject {
             parsedItems.append(item)
         }
         errorMessage = nil
-        successMessage = "已将事项放回待创建列表"
+        successMessage = L10n.Message.retryQueued
     }
 
     func undoHistoryItem(id: UUID) async {
@@ -400,10 +442,10 @@ class MainViewModel: ObservableObject {
             }
             history[index].undoneAt = Date()
             saveHistory()
-            successMessage = "已撤销创建"
+            successMessage = L10n.Message.undone
             errorMessage = nil
         } catch {
-            errorMessage = "撤销失败: \(error.localizedDescription)"
+            errorMessage = L10n.Message.undoFailed(error.localizedDescription)
         }
     }
     
@@ -420,11 +462,13 @@ class MainViewModel: ObservableObject {
     /// 加载历史记录
     private func loadHistory() {
         guard let data = UserDefaults.standard.data(forKey: historyKey) else { return }
-        
+
         do {
             history = try JSONDecoder().decode([CreatedItemRecord].self, from: data)
         } catch {
+            // 解析失败时保留原始数据不覆盖，并向用户提示
             print("加载历史记录失败: \(error)")
+            historyLoadWarning = L10n.Message.historyLoadFailed
         }
     }
     
@@ -436,7 +480,7 @@ class MainViewModel: ObservableObject {
             try await permissionManager.requestAllPermissions()
             loadAvailableLists()
         } catch {
-            errorMessage = "请求权限失败: \(error.localizedDescription)"
+            errorMessage = L10n.Message.requestPermissionFailed(error.localizedDescription)
         }
     }
     

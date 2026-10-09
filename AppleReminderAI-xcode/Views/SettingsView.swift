@@ -19,10 +19,10 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             // 标题栏
             HStack {
-                Text("应用设置")
+                Text(L10n.Settings.title)
                     .font(.headline)
                 Spacer()
-                Button("完成") {
+                Button(L10n.Common.done) {
                     dismiss()
                 }
                 .buttonStyle(BorderedProminentButtonStyle())
@@ -35,14 +35,29 @@ struct SettingsView: View {
                 VStack(spacing: 24) {
                     // 1. 通用设置
                     VStack(alignment: .leading, spacing: 12) {
-                        SectionHeader(title: "通用设置", icon: "gearshape")
+                        SectionHeader(title: L10n.Settings.general, icon: "gearshape")
                         
                         // 使用与权限设置一致的样式
                         HStack {
-                            Text("在状态栏显示")
+                            Text(L10n.Settings.menuBar)
                             Spacer()
                             Toggle("", isOn: $settings.isMenuBarVisible)
                                 .labelsHidden()
+                        }
+                        .padding(10)
+                        .background(Color.secondary.opacity(0.05))
+                        .cornerRadius(8)
+
+                        HStack {
+                            Text(L10n.Settings.historyLimit)
+                            Spacer()
+                            Picker("", selection: $settings.historyLimit) {
+                                ForEach([10, 20, 50, 100, 200], id: \.self) { limit in
+                                    Text(L10n.Settings.limitOption(limit)).tag(limit)
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                            .frame(width: 110)
                         }
                         .padding(10)
                         .background(Color.secondary.opacity(0.05))
@@ -51,24 +66,24 @@ struct SettingsView: View {
                     
                     // 2. OpenAI 配置（始终显示，方便用户配置）
                     VStack(alignment: .leading, spacing: 12) {
-                        SectionHeader(title: "OpenAI 配置", icon: "key.fill")
+                        SectionHeader(title: L10n.Settings.openAISection, icon: "key.fill")
                         
                         VStack(spacing: 12) {
-                            SettingsInput(label: "API Key", text: $settings.openAIAPIKey, placeholder: "sk-...", isSecure: true)
-                            SettingsInput(label: "API Base URL", text: $settings.openAIBaseURL, placeholder: "https://api.openai.com/v1")
-                            SettingsInput(label: "AI 模型", text: $settings.openAIModel, placeholder: "gpt-4o-mini")
+                            SettingsInput(label: L10n.Settings.apiKeyField, text: $settings.openAIAPIKey, placeholder: "sk-...", isSecure: true)
+                            SettingsInput(label: L10n.Settings.baseURLField, text: $settings.openAIBaseURL, placeholder: "https://api.openai.com/v1")
+                            SettingsInput(label: L10n.Settings.modelField, text: $settings.openAIModel, placeholder: "gpt-4o-mini")
                         }
                         .padding(12)
                         .background(Color.secondary.opacity(0.05))
                         .cornerRadius(8)
                         
                         if !settings.isOpenAIConfigured {
-                            Label("请检查 API Key 和服务地址；远程地址必须使用 HTTPS", systemImage: "exclamationmark.triangle.fill")
+                            Label(L10n.Settings.notConfiguredWarning, systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption)
                                 .foregroundColor(.orange)
                         }
 
-                        Label("AI 解析会将输入内容和现有分组名称发送到所配置的服务端。API Key 存储在系统钥匙串中。", systemImage: "hand.raised.fill")
+                        Label(L10n.Settings.privacyNote, systemImage: "hand.raised.fill")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -76,11 +91,11 @@ struct SettingsView: View {
                     
                     // 3. 系统权限
                     VStack(alignment: .leading, spacing: 12) {
-                        SectionHeader(title: "系统权限", icon: "lock.shield.fill")
+                        SectionHeader(title: L10n.Settings.permissions, icon: "lock.shield.fill")
                         
                         VStack(spacing: 8) {
                             PermissionRow(
-                                title: "提醒事项权限",
+                                title: L10n.Settings.reminderPermission,
                                 status: permissionManager.reminderStatus,
                                 icon: permissionManager.statusIcon(for: permissionManager.reminderStatus),
                                 color: permissionManager.statusColorName(for: permissionManager.reminderStatus),
@@ -92,7 +107,7 @@ struct SettingsView: View {
                             )
                             
                             PermissionRow(
-                                title: "日历权限",
+                                title: L10n.Settings.calendarPermission,
                                 status: permissionManager.calendarStatus,
                                 icon: permissionManager.statusIcon(for: permissionManager.calendarStatus),
                                 color: permissionManager.statusColorName(for: permissionManager.calendarStatus),
@@ -107,7 +122,7 @@ struct SettingsView: View {
                     
                     // 4. 关于
                     VStack(alignment: .leading, spacing: 12) {
-                        SectionHeader(title: "关于", icon: "info.circle.fill")
+                        SectionHeader(title: L10n.Settings.about, icon: "info.circle.fill")
                         
                         VStack(alignment: .leading, spacing: 4) {
                             Text("苹果提醒事项 AI 助手")
@@ -196,13 +211,13 @@ struct PermissionRow: View {
             Spacer()
             
             if status == .notDetermined {
-                Button("去请求") {
+                Button(L10n.Settings.requestPermission) {
                     onRequest()
                 }
                 .buttonStyle(BorderedButtonStyle())
                 .controlSize(.small)
             } else if status == .denied || status == .restricted {
-                Button("去设置") {
+                Button(L10n.Settings.openSystemSettings) {
                     if let url = URL(string: settingsURL) {
                         NSWorkspace.shared.open(url)
                     }

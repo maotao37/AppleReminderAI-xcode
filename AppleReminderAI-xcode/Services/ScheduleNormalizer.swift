@@ -12,6 +12,15 @@ enum ScheduleNormalizer {
         item.recurrenceWeekdays = item.recurrenceWeekdays.map {
             Array(Set($0.filter { (1...7).contains($0) })).sorted()
         }
+        item.recurrenceDaysOfMonth = item.recurrenceDaysOfMonth.map {
+            Array(Set($0.filter { (1...31).contains($0) })).sorted()
+        }
+        item.recurrenceMonthsOfYear = item.recurrenceMonthsOfYear.map {
+            Array(Set($0.filter { (1...12).contains($0) })).sorted()
+        }
+        item.recurrenceSetPosition = item.recurrenceSetPosition.flatMap {
+            ($0 == -1 || (1...4).contains($0)) ? $0 : nil
+        }
 
         item.targetGroupName = trimmedValue(item.targetGroupName)
         item.targetGroupIdentifier = trimmedValue(item.targetGroupIdentifier)

@@ -23,10 +23,10 @@ struct MainView: View {
                 VStack(spacing: 16) {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("苹果提醒事项 AI")
+                            Text(L10n.Main.title)
                                 .font(.title2)
                                 .fontWeight(.bold)
-                            Text("输入内容，智能同步到日历和提醒事项")
+                            Text(L10n.Main.subtitle)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -40,7 +40,7 @@ struct MainView: View {
                             .onTapGesture {
                                 viewModel.showSettings = true
                             }
-                            .help("设置")
+                            .help(L10n.Common.settings)
                     }
                     .padding(.top, 8)
                     
@@ -48,7 +48,7 @@ struct MainView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ZStack(alignment: .topLeading) {
                             if viewModel.inputText.isEmpty {
-                                Text("例如：每周一提醒我提交周报")
+                                Text(L10n.Main.inputPlaceholder)
                                     .foregroundColor(.secondary.opacity(0.5))
                                     .padding(.top, 12)
                                     .padding(.leading, 12)
@@ -73,30 +73,44 @@ struct MainView: View {
                                     Spacer()
                                     HStack {
                                         Spacer()
-                                        Button {
-                                            Task { await viewModel.parseInput() }
-                                        } label: {
-                                            HStack(spacing: 4) {
-                                                if viewModel.isParsing {
-                                                    ProgressView()
-                                                        .controlSize(.small)
-                                                        .scaleEffect(0.6)
-                                                } else {
-                                                    Image(systemName: "sparkles")
+                                        if viewModel.isParsing {
+                                            // 解析中显示取消按钮（Esc），慢网络不必干等超时
+                                            Button {
+                                                viewModel.cancelParsing()
+                                            } label: {
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: "xmark.circle")
+                                                    Text(L10n.Main.cancelParse)
                                                 }
-                                                Text("AI 解析")
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 5)
+                                                .background(Color.red)
+                                                .foregroundColor(.white)
+                                                .cornerRadius(6)
                                             }
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 5)
-                                            .background(Color.blue)
-                                            .foregroundColor(.white)
-                                            .cornerRadius(6)
+                                            .buttonStyle(PlainButtonStyle())
+                                            .keyboardShortcut(.cancelAction)
+                                            .padding(8)
+                                            .transition(.scale.combined(with: .opacity))
+                                        } else {
+                                            Button {
+                                                viewModel.startParsing()
+                                            } label: {
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: "sparkles")
+                                                    Text(L10n.Main.aiParse)
+                                                }
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 5)
+                                                .background(Color.blue)
+                                                .foregroundColor(.white)
+                                                .cornerRadius(6)
+                                            }
+                                            .buttonStyle(PlainButtonStyle())
+                                            .keyboardShortcut(.return, modifiers: [.command])
+                                            .padding(8)
+                                            .transition(.scale.combined(with: .opacity))
                                         }
-                                        .buttonStyle(PlainButtonStyle())
-                                        .disabled(viewModel.isParsing)
-                                        .keyboardShortcut(.return, modifiers: [.command])
-                                        .padding(8)
-                                        .transition(.scale.combined(with: .opacity))
                                     }
                                 }
                                 .frame(height: 80) // 与 TextEditor 高度一致
@@ -109,9 +123,15 @@ struct MainView: View {
                                 ProgressView()
                                     .controlSize(.small)
                                     .scaleEffect(0.8)
-                                Text("正在解析内容...")
+                                Text(L10n.Main.parsing)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
+                                Button(L10n.Main.cancel) {
+                                    viewModel.cancelParsing()
+                                }
+                                .font(.caption)
+                                .buttonStyle(PlainButtonStyle())
+                                .foregroundColor(.red)
                             } else if let error = viewModel.errorMessage {
                                 Image(systemName: "exclamationmark.circle.fill")
                                     .foregroundColor(.red)
@@ -171,6 +191,7 @@ struct MainView: View {
                                 viewModel.updateParsedItem(item, at: index)
                             },
                             isCreating: viewModel.isCreating,
+                            creationProgress: viewModel.creationProgress,
                             reminderLists: viewModel.reminderLists,
                             calendars: viewModel.calendars,
                             selectedReminderList: $viewModel.selectedReminderList,
@@ -182,6 +203,7 @@ struct MainView: View {
                         // 显示历史记录
                         HistoryView(
                             history: viewModel.history,
+                            loadWarning: viewModel.historyLoadWarning,
                             onClear: { viewModel.clearHistory() },
                             onRetry: { viewModel.retryHistoryItem(id: $0) },
                             onUndo: { id in

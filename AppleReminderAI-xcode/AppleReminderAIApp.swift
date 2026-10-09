@@ -34,21 +34,21 @@ struct AppleReminderAIApp: App {
         .windowResizability(.contentSize)
         
         // 状态栏图标（根据设置控制是否显示）
-        MenuBarExtra("苹果提醒事项 AI", systemImage: "sparkles", isInserted: $isMenuBarVisible) {
-            Button("显示主界面") {
+        MenuBarExtra(L10n.Main.title, systemImage: "sparkles", isInserted: $isMenuBarVisible) {
+            Button(L10n.App.showMainWindow) {
                 openMainWindow()
             }
             .keyboardShortcut("o", modifiers: .command)
             
             Divider()
             
-            Button("设置...") {
+            Button(L10n.App.openSettings) {
                 openSettingsWindow()
             }
             
             Divider()
             
-            Button("退出") {
+            Button(L10n.App.quit) {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q", modifiers: .command)
@@ -86,7 +86,7 @@ struct AppleReminderAIApp: App {
     private func openSettingsWindow() {
         openMainWindow()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            NotificationCenter.default.post(name: NSNotification.Name("OpenSettings"), object: nil)
+            NotificationCenter.default.post(name: .openSettingsRequest, object: nil)
         }
     }
 }

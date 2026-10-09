@@ -8,6 +8,7 @@
 
 import Foundation
 import Combine
+import AppKit
 
 /// 解析模式枚举
 enum ParserMode: String, CaseIterable, Codable {
@@ -45,6 +46,7 @@ class AppSettings: ObservableObject {
         static let defaultReminderListID = "defaultReminderListID"
         static let defaultCalendarID = "defaultCalendarID"
         static let isMenuBarVisible = "isMenuBarVisible"
+        static let historyLimit = "historyLimit"
     }
 
     private static let apiKeyAccount = "openAIAPIKey"
@@ -53,6 +55,9 @@ class AppSettings: ObservableObject {
     static let shared = AppSettings()
     
     private let defaults = UserDefaults.standard
+
+    /// Combine 订阅存储
+    private var cancellables = Set<AnyCancellable>()
     
     // MARK: - 解析设置
     
@@ -66,11 +71,8 @@ class AppSettings: ObservableObject {
     // MARK: - OpenAI 设置
     
     /// OpenAI API Key
-    @Published var openAIAPIKey: String {
-        didSet {
-            KeychainStore.set(openAIAPIKey, for: Self.apiKeyAccount)
-        }
-    }
+    /// 注意：Keychain 写入经防抖后执行，避免输入每个字符都触发一次磁盘加密写入
+    @Published var openAIAPIKey: String
     
     /// OpenAI API Base URL（支持自定义端点）
     @Published var openAIBaseURL: String {
@@ -110,6 +112,15 @@ class AppSettings: ObservableObject {
             defaults.set(defaultCalendarID, forKey: Keys.defaultCalendarID)
         }
     }
+
+    // MARK: - 历史记录设置
+
+    /// 历史记录保留条数上限
+    @Published var historyLimit: Int {
+        didSet {
+            defaults.set(historyLimit, forKey: Keys.historyLimit)
+        }
+    }
     
     // MARK: - 初始化
     
@@ -133,6 +144,29 @@ class AppSettings: ObservableObject {
         
         self.defaultReminderListID = defaults.string(forKey: Keys.defaultReminderListID)
         self.defaultCalendarID = defaults.string(forKey: Keys.defaultCalendarID)
+        self.historyLimit = defaults.object(forKey: Keys.historyLimit) as? Int ?? 50
+
+        setupAPIKeyPersistence()
+    }
+
+    /// API Key 防抖写入 Keychain：停止输入 0.5 秒或应用退出时落盘
+    private func setupAPIKeyPersistence() {
+        $openAIAPIKey
+            .dropFirst()
+            .removeDuplicates()
+            .debounce(for: .seconds(0.5), scheduler: DispatchQueue.main)
+            .sink { [weak self] value in
+                KeychainStore.set(value, for: Self.apiKeyAccount)
+            }
+            .store(in: &cancellables)
+
+        // 退出时立即落盘，避免防抖窗口内的最后输入丢失
+        NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                KeychainStore.set(self.openAIAPIKey, for: Self.apiKeyAccount)
+            }
+            .store(in: &cancellables)
     }
     
     // MARK: - 便捷方法
@@ -164,5 +198,6 @@ class AppSettings: ObservableObject {
         isMenuBarVisible = true
         defaultReminderListID = nil
         defaultCalendarID = nil
+        historyLimit = 50
     }
 }
